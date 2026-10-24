@@ -27,6 +27,8 @@ async function main(){
   try{
     for(const backend of ['rust','electron','electron','rust','rust','electron']){
       const data=path.join(root,'.test-data',`benchmark-${backend}-${Date.now()}`);
+      fs.mkdirSync(data,{recursive:true});
+      fs.writeFileSync(path.join(data,'client-settings.json'),JSON.stringify({sessions:[],preferences:{autoCheckUpdates:false},backups:{}}));
       const app=backend==='rust'?await launchNative(data):await launchElectron(data);
       try{
         await wait(1500);

@@ -98,6 +98,7 @@ pub struct Preferences {
     pub keep_awake: bool,
     pub allow_media: bool,
     pub prefer_dedicated_gpu: bool,
+    pub auto_check_updates: bool,
 }
 impl Default for Preferences {
     fn default() -> Self {
@@ -106,6 +107,7 @@ impl Default for Preferences {
             keep_awake: yes(),
             allow_media: false,
             prefer_dedicated_gpu: yes(),
+            auto_check_updates: yes(),
         }
     }
 }
@@ -311,6 +313,9 @@ fn patch_preferences(preferences: &mut Preferences, input: &Value) {
     }
     if let Some(v) = input["preferDedicatedGpu"].as_bool() {
         preferences.prefer_dedicated_gpu = v;
+    }
+    if let Some(v) = input["autoCheckUpdates"].as_bool() {
+        preferences.auto_check_updates = v;
     }
 }
 pub fn lock_instance(directory: &Path) -> Result<fs::File> {

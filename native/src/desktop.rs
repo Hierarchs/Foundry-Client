@@ -1,6 +1,7 @@
 use crate::{
     core::{self, Session, Store},
     metrics::Metrics,
+    updates,
     web::{self, Trust},
 };
 use serde::Deserialize;
@@ -112,6 +113,9 @@ struct Client {
     awake: bool,
     metrics: Metrics,
     graphics: Value,
+    updates: updates::State,
+    update_result: Option<std::sync::mpsc::Receiver<core::Result<Option<updates::Release>>>>,
+    update_deadline: Option<Instant>,
     pending: HashMap<u64, Pending>,
     proxy: EventLoopProxy<NativeEvent>,
     testing: bool,
@@ -192,6 +196,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         awake: false,
         metrics: Metrics::new(),
         graphics: json!({"webgl":"pending"}),
+        updates: updates::State::new(env!("CARGO_PKG_VERSION")),
+        update_result: None,
+        update_deadline: None,
         pending: HashMap::new(),
         proxy,
         testing,
@@ -200,13 +207,16 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         _context: context,
     };
     client.layout();
+    if client.store.data.preferences.auto_check_updates {
+        client.check_updates();
+    }
     event_loop.run(move |event, target, flow| {
-        *flow = client
-            .pending
-            .values()
-            .map(|p| p.deadline)
-            .min()
-            .map_or(ControlFlow::Wait, ControlFlow::WaitUntil);
+        let mut deadline = client.pending.values().map(|p| p.deadline).min();
+        if client.update_result.is_some() {
+            let next = Instant::now() + Duration::from_millis(200);
+            deadline = Some(deadline.map_or(next, |d| d.min(next)));
+        }
+        *flow = deadline.map_or(ControlFlow::Wait, ControlFlow::WaitUntil);
         match event {
             Event::UserEvent(event) => client.event(event, target),
             Event::WindowEvent {
@@ -244,6 +254,27 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             Event::MainEventsCleared => {
+                let result = client
+                    .update_result
+                    .as_ref()
+                    .and_then(|r| match r.try_recv() {
+                        Ok(value) => Some(value),
+                        Err(std::sync::mpsc::TryRecvError::Disconnected) => Some(Err(
+                            "The update check could not finish. Please try again.".into(),
+                        )),
+                        Err(std::sync::mpsc::TryRecvError::Empty) => None,
+                    })
+                    .or_else(|| {
+                        (client.update_result.is_some()
+                            && client.update_deadline.is_some_and(|d| Instant::now() >= d))
+                        .then(|| Err("The update check timed out. Please try again.".into()))
+                    });
+                if let Some(result) = result {
+                    client.update_result = None;
+                    client.update_deadline = None;
+                    client.updates.complete(result);
+                    client.publish();
+                }
                 let expired: Vec<_> = client
                     .pending
                     .iter()
@@ -273,6 +304,27 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 impl Client {
+    fn check_updates(&mut self) {
+        if self.updates.status == "checking" {
+            return;
+        }
+        self.updates.checking();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let endpoint = updates::endpoint(self.testing);
+        if let Err(error) = std::thread::Builder::new()
+            .name("update-check".into())
+            .spawn(move || {
+                let _ = sender.send(updates::fetch(&endpoint));
+            })
+        {
+            self.updates
+                .complete(Err(format!("Could not start the update check: {error}")));
+        } else {
+            self.update_result = Some(receiver);
+            self.update_deadline = Some(Instant::now() + Duration::from_secs(25));
+        }
+        self.publish();
+    }
     fn snapshot(&self) -> Value {
         let mut active = self
             .active
@@ -284,7 +336,7 @@ impl Client {
             a["id"] = Value::Null;
         }
         json!({"sessions":self.store.data.sessions,"preferences":self.store.data.preferences,"profiles":core::profiles(),"active":active,
-            "status":{"phase":self.phase,"message":self.message},"overlay":self.overlay,"focusMode":self.focus,"warning":self.store.warning,
+            "status":{"phase":self.phase,"message":self.message},"overlay":self.overlay,"focusMode":self.focus,"warning":self.store.warning,"updates":self.updates,
             "runtime":{"app":env!("CARGO_PKG_VERSION"),"backend":"rust","rust":env!("FOUNDRY_RUST_VERSION"),"engine":"WebView2","chromium":wry::webview_version().unwrap_or_else(|_| "Unknown".into()),"ramGB":self.metrics.ram_gb()}})
     }
     fn publish(&self) {
@@ -623,6 +675,19 @@ impl Client {
     fn command(&mut self, request: &Rpc) -> core::Result<Option<Value>> {
         let input = &request.payload;
         let value = match request.action.as_str() {
+            "check-updates" => {
+                self.check_updates();
+                self.snapshot()
+            }
+            "open-update" => {
+                let url = self
+                    .updates
+                    .link(input.as_str().ok_or("Choose an update link.")?)?;
+                if !self.testing {
+                    webbrowser::open(url).map_err(|e| e.to_string())?;
+                }
+                json!(url)
+            }
             "state" => self.snapshot(),
             "save" => {
                 let id = self.store.save(input)?;

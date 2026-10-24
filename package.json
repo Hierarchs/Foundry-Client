@@ -1,6 +1,6 @@
 {
   "name": "foundry-client",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Native Rust and WebView2 desktop client for Foundry Virtual Tabletop V14 and Sqyre hosting.",
   "author": "Hierarchs",
   "private": true,

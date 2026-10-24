@@ -61,7 +61,7 @@ test('session edits, preference validation, and settings survive a restart', t =
   assert.equal(reopened.data.sessions[0].url, 'https://updated.games.sqyre.app/');
   assert.equal(reopened.data.sessions[0].id, a.id);
   assert.equal(reopened.data.sessions[1].profile, 'balanced');
-  assert.deepEqual(reopened.data.preferences, { allowMedia: true, backgroundThrottle: true, keepAwake: true, preferDedicatedGpu: true });
+  assert.deepEqual(reopened.data.preferences, { allowMedia: true, backgroundThrottle: true, keepAwake: true, preferDedicatedGpu: true, autoCheckUpdates: true });
   reopened.remove(b.id);
   assert.equal(new Store(dir).data.sessions.length, 1);
 });

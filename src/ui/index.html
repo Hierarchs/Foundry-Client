@@ -39,6 +39,7 @@
     <main>
       <div id="connection-banner" class="connection-banner" hidden><span id="connection-message"></span><div><button id="retry" class="text-button">Retry</button><button id="disconnect" class="text-button">Disconnect</button><button id="resume" class="text-button">Return to game →</button></div></div>
       <div id="warning" class="notice" hidden></div>
+      <div id="update-banner" class="connection-banner" hidden><span id="update-banner-text"></span><button id="review-update" class="text-button">View update →</button></div>
 
       <section id="page-sessions" class="page">
         <div class="page-top"><span class="eyebrow">THE ADVENTURE STARTS HERE</span><span class="subtle-label"><span class="tiny-diamond"></span><span id="client-version-label">CLIENT</span></span></div>
@@ -78,6 +79,15 @@
 
       <section id="page-preferences" class="page" hidden>
         <div class="page-top"><span class="eyebrow">MAKE YOURSELF AT HOME</span><span class="subtle-label">CLIENT SETTINGS</span></div><h1 class="page-title">Your preferences<span class="gold-dot">.</span></h1><p class="page-intro">Small adjustments for the way you play.</p>
+        <div id="update-panel" class="settings-panel preferences-panel" hidden>
+          <h2>Client updates</h2>
+          <p id="update-version" class="section-description"></p>
+          <p id="update-status" class="result-message" role="status" aria-live="polite">Check for a newer version of Foundry Client.</p>
+          <p id="update-checked" class="field-hint"></p>
+          <div class="action-row"><button id="check-updates" class="secondary-button">Check for updates</button><button id="download-update" class="primary-button" hidden>Download installer</button><button id="release-notes" class="text-button">View releases</button></div>
+          <p class="field-hint">Downloads open in your browser. Install when you’re ready; your saved sessions are kept.</p>
+          <label class="setting-row"><span><strong>Check for updates on startup</strong><small>Look for a new stable client version when you open the app.</small></span><input type="checkbox" id="pref-autoCheckUpdates" role="switch"></label>
+        </div>
         <div class="settings-panel preferences-panel"><h2>During a session</h2>
           <label class="setting-row" id="gpu-preference-row"><span><strong>Prefer the dedicated GPU</strong><small>Use your dedicated graphics card when available. Recommended for Foundry. Changes take effect after restarting the client.</small></span><input type="checkbox" id="pref-preferDedicatedGpu" role="switch"></label>
           <label class="setting-row"><span><strong>Ease off when minimized</strong><small id="background-throttle-description">Let Chromium throttle background rendering to save resources. Turn off if background game animations need to keep running.</small></span><input type="checkbox" id="pref-backgroundThrottle" role="switch"></label>

@@ -4,7 +4,7 @@ A dedicated **Windows 10/11 x64 client for Foundry Virtual Tabletop V14**, inclu
 
 ## Run it
 
-Download/extract the portable archive from `release/rust/`, then run **Foundry Client.exe**. Alternatively, use **Foundry-Client-Rust-Setup-0.2.1-x64.exe**. The installer creates separate Rust-edition shortcuts and leaves an existing Electron installation intact.
+Download/extract the portable archive from `release/rust/`, then run **Foundry Client.exe**. Alternatively, use **Foundry-Client-Rust-Setup-0.2.2-x64.exe**. The installer creates separate Rust-edition shortcuts and leaves an existing Electron installation intact.
 
 1. Start your game on Sqyre and copy its **game join link**.
 2. Paste it into **Join a session**, optionally name it, and click **Join session**.
@@ -14,7 +14,21 @@ Download/extract the portable archive from `release/rust/`, then run **Foundry C
 
 This application is a client for an existing server. It does not include or host Foundry, start Sqyre servers, or bundle licensed game content. A hosting dashboard URL is not necessarily a game join link. Authentication providers that prohibit embedded browsers may need additional integration; logging in through an external browser does not automatically transfer its cookies into this client.
 
-**Microsoft Edge WebView2 Runtime is required.** It is normally present on modern Windows installations; [download it from Microsoft](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) if needed. Rust, Node.js, and Visual Studio are not required to run the compiled client. These builds are unsigned and do not have automatic app updates; WebView2 receives its own Microsoft updates.
+**Microsoft Edge WebView2 Runtime is required.** It is normally present on modern Windows installations; [download it from Microsoft](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) if needed. Rust, Node.js, and Visual Studio are not required to run the compiled client. These builds are unsigned. The Rust client checks for updates and opens downloads for manual installation; WebView2 receives its own Microsoft updates.
+
+## Update checker
+
+Open **Preferences → Client updates** to check manually, see the installed version and last check time, read release notes, or open a newer Windows download. **Check for updates on startup** is enabled by default and can be turned off. Available versions appear in a banner in the launcher; checks do not open dialogs or interrupt a game.
+
+The Rust host queries this repository's [latest public stable GitHub release](https://github.com/Hierarchs/Foundry-Client/releases) on a background worker using Windows networking. It compares semantic versions, ignores drafts/prereleases, and never offers a downgrade. Missing releases, offline errors, and rate limits have separate messages. Requests use no game cookies, invitation links, account tokens, or authentication. The request has bounded response size, timeouts, certificate validation, and no automatic redirects. Only matching Windows assets hosted under this repository's release URL can become download buttons.
+
+Downloads open in the default browser. Close the client before running the new installer, or extract the portable ZIP and run its executable. Saved sessions and browser profiles remain in their existing user-data folders. The checker does not automatically install or execute downloaded files. This feature belongs to the Rust edition; the retained Electron comparison host does not check for updates.
+
+### Publishing updates
+
+The repository currently has no public stable release. Until one is published, the checker reports **No public stable release was found**. A source commit or Actions artifact alone is not an update feed.
+
+For a future release, synchronize the versions in `package.json`, `package-lock.json`, `native/Cargo.toml`, and `native/Cargo.lock`, commit the tested source, and push a matching `vX.Y.Z` Git tag. The workflow verifies/builds Windows, creates a draft release with the executable, installer, portable ZIP, license notices and SHA-256 hashes, then publishes it as the latest release after uploads finish. A mismatched tag is rejected. The publishing job alone has release-write permissions. Do not move an already-published version tag; use a new version for fixes.
 
 ## Connection compatibility
 

@@ -4,6 +4,7 @@ mod core;
 mod desktop;
 #[cfg(windows)]
 mod metrics;
+mod updates;
 #[cfg(windows)]
 mod web;
 

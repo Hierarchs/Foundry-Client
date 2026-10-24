@@ -48,7 +48,24 @@ function render(next) {
   }
   $('apply-profile').disabled = !state.active;
   $('restore-profile').disabled = !state.active;
-  renderSessions(); renderCache(); renderRuntime(); scheduleDiagnostics();
+  renderSessions(); renderCache(); renderRuntime(); renderUpdates(); scheduleDiagnostics();
+}
+function renderUpdates() {
+  const update = state.updates;
+  $('update-panel').hidden = !update;
+  const available = update?.status === 'available';
+  $('update-banner').hidden = !available;
+  if (!update) return;
+  $('update-version').textContent = `Installed version ${update.currentVersion}`;
+  $('update-status').textContent = update.message;
+  $('update-status').classList.toggle('error', update.status === 'error');
+  $('update-checked').textContent = update.lastChecked ? `Last checked ${new Date(update.lastChecked).toLocaleString()}` : '';
+  $('check-updates').disabled = update.status === 'checking';
+  $('check-updates').textContent = update.status === 'checking' ? 'Checking…' : 'Check for updates';
+  $('download-update').hidden = !available || !update.release?.downloadUrl;
+  $('download-update').textContent = update.release?.downloadLabel || 'Download installer';
+  $('release-notes').textContent = update.release ? 'Release notes' : 'View releases';
+  $('update-banner-text').textContent = available ? update.message : '';
 }
 function renderSessions() {
   $('session-list').replaceChildren();
@@ -177,7 +194,11 @@ for (const action of ['minimize', 'maximize', 'close']) $(action).onclick = () =
 document.querySelector('.titlebar').addEventListener('pointerdown', event => {
   if (state?.runtime.backend === 'rust' && event.button === 0 && !event.target.closest('button')) safely(() => invoke('drag'));
 });
-for (const key of ['backgroundThrottle', 'keepAwake', 'allowMedia', 'preferDedicatedGpu']) $(`pref-${key}`).onchange = () => safely(async () => { render(await invoke('preferences', { [key]: $(`pref-${key}`).checked })); toast(key === 'preferDedicatedGpu' || (key === 'backgroundThrottle' && state.runtime.backend === 'rust') ? 'Preference saved. Restart the client to finish applying.' : 'Preference saved.'); });
+for (const key of ['backgroundThrottle', 'keepAwake', 'allowMedia', 'preferDedicatedGpu', 'autoCheckUpdates']) $(`pref-${key}`).onchange = () => safely(async () => { render(await invoke('preferences', { [key]: $(`pref-${key}`).checked })); toast(key === 'preferDedicatedGpu' || (key === 'backgroundThrottle' && state.runtime.backend === 'rust') ? 'Preference saved. Restart the client to finish applying.' : 'Preference saved.'); });
+$('check-updates').onclick = () => safely(async () => render(await invoke('check-updates')));
+$('review-update').onclick = () => safely(() => showPage('preferences'));
+$('download-update').onclick = () => safely(() => invoke('open-update', 'download'));
+$('release-notes').onclick = () => safely(() => invoke('open-update', state.updates?.release ? 'release' : 'releases'));
 $('apply-profile').onclick = () => safely(async () => {
   result('profile-result', 'Applying rendering settings…');
   try {

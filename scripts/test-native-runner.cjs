@@ -5,5 +5,6 @@ const path = require('node:path');
 try {
   cargo(['build','--manifest-path','native/Cargo.toml','--features','test-driver','--locked']);
   const result=spawnSync(process.execPath,[path.join(__dirname,'test-native.cjs')],{stdio:'inherit',env:process.env});
-  process.exitCode=result.status ?? 1;
+  if(result.status !== 0) process.exitCode=result.status ?? 1;
+  else process.exitCode=spawnSync(process.execPath,[path.join(__dirname,'test-updates.cjs')],{stdio:'inherit',env:process.env}).status ?? 1;
 } catch(error) {console.error(error.message);process.exitCode=1;}

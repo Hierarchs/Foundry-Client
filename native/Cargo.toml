@@ -1,6 +1,6 @@
 [package]
 name = "foundry-client"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2024"
 description = "Native Rust desktop client for Foundry VTT V14"
 build = "build.rs"
@@ -11,6 +11,7 @@ test-driver = []
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+semver = "1"
 url = "2"
 uuid = { version = "1", features = ["v4"] }
 sha2 = "0.10"
@@ -23,7 +24,7 @@ rfd = "0.17"
 webbrowser = "1"
 sysinfo = "0.37"
 webview2-com = "0.39"
-windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_Power", "Win32_System_Threading", "Win32_System_Memory", "Win32_System_SystemInformation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse"] }
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Networking_WinHttp", "Win32_System_Power", "Win32_System_Threading", "Win32_System_Memory", "Win32_System_SystemInformation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse"] }
 
 [build-dependencies]
 winresource = "0.1"

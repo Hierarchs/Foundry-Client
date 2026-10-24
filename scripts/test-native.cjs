@@ -16,9 +16,9 @@ async function freePort() {
   await new Promise(resolve => server.close(resolve));
   return port;
 }
-async function launch(data) {
+async function launch(data, options = {}) {
   const port = await freePort();
-  const child = spawn(executable, [], { cwd: root, windowsHide: true, env: { ...process.env, FOUNDRY_CLIENT_TEST: '1', FOUNDRY_CLIENT_TEST_USER_DATA: data, FOUNDRY_CLIENT_DEBUG_PORT: String(port) }, stdio: ['ignore','pipe','pipe'] });
+  const child = spawn(executable, [], { cwd: root, windowsHide: true, env: { ...process.env, FOUNDRY_CLIENT_TEST: '1', FOUNDRY_CLIENT_TEST_USER_DATA: data, FOUNDRY_CLIENT_DEBUG_PORT: String(port), FOUNDRY_CLIENT_UPDATE_TEST_URL: options.updateUrl || 'http://127.0.0.1:9' }, stdio: ['ignore','pipe','pipe'] });
   let output = '';
   child.stdout.on('data', d => { output += d; }); child.stderr.on('data', d => { output += d; });
   let browser;
@@ -67,7 +67,7 @@ async function verify() {
   const data = path.join(root,'.test-data',`native-${Date.now()}`);
   fs.mkdirSync(data,{recursive:true});
   // Exercise migration from an existing Electron-format saved session.
-  fs.writeFileSync(path.join(data,'client-settings.json'),JSON.stringify({sessions:[{id:'legacy-id',name:'Imported campaign',url:`${base}/join?invite=kept`,profile:'balanced',lastJoined:null}],preferences:{backgroundThrottle:true,keepAwake:false,allowMedia:false,preferDedicatedGpu:true},backups:{}}));
+  fs.writeFileSync(path.join(data,'client-settings.json'),JSON.stringify({sessions:[{id:'legacy-id',name:'Imported campaign',url:`${base}/join?invite=kept`,profile:'balanced',lastJoined:null}],preferences:{backgroundThrottle:true,keepAwake:false,allowMedia:false,preferDedicatedGpu:true,autoCheckUpdates:false},backups:{}}));
   let application;
   try {
     application = await launch(data);

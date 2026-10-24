@@ -48,7 +48,7 @@ function cleanSession(input, existing) {
   return { id: existing?.id || randomUUID(), name: name || new URL(url).hostname, url, profile, lastJoined: existing?.lastJoined || null };
 }
 
-const DEFAULTS = Object.freeze({ backgroundThrottle: true, keepAwake: true, allowMedia: false, preferDedicatedGpu: true });
+const DEFAULTS = Object.freeze({ backgroundThrottle: true, keepAwake: true, allowMedia: false, preferDedicatedGpu: true, autoCheckUpdates: true });
 
 class Store {
   constructor(directory) {
