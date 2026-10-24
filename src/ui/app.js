@@ -36,6 +36,8 @@ function render(next) {
   $('list-count').textContent = String(state.sessions.length).padStart(2, '0');
   $('runtime-short').textContent = `Chromium ${state.runtime.chromium.split('.')[0]}`;
   $('client-version-label').textContent = `CLIENT ${state.runtime.app}`;
+  $('frame-limit-panel').hidden = $('window-layout-panel').hidden = state.runtime.backend !== 'rust';
+  $('apply-frame-limit').disabled = $('restore-frame-limit').disabled = !state.active;
   if (state.runtime.backend === 'rust') {
     $('runtime-short').textContent = `Rust · WebView2 ${state.runtime.chromium.split('.')[0]}`;
     $('background-throttle-description').textContent = 'Reduce browser memory while minimized. Changes to background timer throttling take effect after restarting the client.';
@@ -212,6 +214,15 @@ $('restore-profile').onclick = () => safely(async () => {
   catch (error) { result('profile-result', errorText(error), true); }
 }, $('restore-profile'));
 $('clear-cache').onclick = () => safely(async () => { try { await invoke('cache', $('cache-session').value); result('cache-result', 'Asset cache cleared. Login and settings retained.'); } catch (error) { result('cache-result', errorText(error), true); } }, $('clear-cache'));
+$('apply-frame-limit').onclick = () => safely(async () => {
+  try { const changed = await invoke('frame-limit', Number($('frame-limit').value)); result('frame-limit-result', changed.maxFPS === 0 ? 'Uncapped canvas requested. Actual FPS remains display and GPU limited.' : `${changed.maxFPS} FPS canvas limit applied.`); }
+  catch(error) { result('frame-limit-result', errorText(error), true); }
+}, $('apply-frame-limit'));
+$('restore-frame-limit').onclick = () => safely(async () => {
+  try { const changed = await invoke('frame-limit', null); result('frame-limit-result', `Original canvas FPS limit restored (${changed.maxFPS === 0 ? 'uncapped' : changed.maxFPS + ' FPS'}).`); }
+  catch(error) { result('frame-limit-result', errorText(error), true); }
+}, $('restore-frame-limit'));
+$('gather-windows').onclick = () => safely(async () => { await invoke('gather-windows'); result('layout-result', 'Open pop-outs moved to this monitor.'); }, $('gather-windows'));
 document.addEventListener('visibilitychange', scheduleDiagnostics);
 document.addEventListener('keydown', event => {
   const modifier = event.ctrlKey || event.metaKey;

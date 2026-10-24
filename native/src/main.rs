@@ -2,6 +2,7 @@
 mod core;
 #[cfg(windows)]
 mod desktop;
+mod layouts;
 #[cfg(windows)]
 mod metrics;
 mod updates;

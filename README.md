@@ -4,7 +4,7 @@ A dedicated **Windows 10/11 x64 client for Foundry Virtual Tabletop V14**, inclu
 
 ## Run it
 
-Download/extract the portable archive from `release/rust/`, then run **Foundry Client.exe**. Alternatively, use **Foundry-Client-Rust-Setup-0.2.2-x64.exe**. The installer creates separate Rust-edition shortcuts and leaves an existing Electron installation intact.
+Download/extract the portable archive from `release/rust/`, then run **Foundry Client.exe**. Alternatively, use **Foundry-Client-Rust-Setup-0.3.0-x64.exe**. The installer creates separate Rust-edition shortcuts and leaves an existing Electron installation intact.
 
 1. Start your game on Sqyre and copy its **game join link**.
 2. Paste it into **Join a session**, optionally name it, and click **Join session**.
@@ -51,7 +51,7 @@ HTTPS certificate validation remains enabled. Camera, microphone, and other secu
 
 ## What Rust changes
 
-- Removes the Electron/Node host and the Chromium runtime bundled with the old application. The Rust release executable is about **1.4 MiB**, excluding the separately installed WebView2 runtime and dependency notices.
+- Removes the Electron/Node host and the Chromium runtime bundled with the old application. The Rust release executable is about **1.5 MiB**, excluding the separately installed WebView2 runtime and dependency notices.
 - Uses one WebView2 environment with isolated browser profiles per server origin. Switching sessions drops the old game view and its pop-outs while retaining cached assets and supported login cookies.
 - Uses Rust for URL validation, atomic settings writes, window lifetime, cache clearing, diagnostics, and rendering-profile backups.
 - Uses an event loop that sleeps when idle. Full process diagnostics run only when requested. The optional gameplay FPS monitor reads only the canvas ticker, without scanning processes.
@@ -70,6 +70,16 @@ The saved [comparison report](benchmarks/host-overhead.json) uses three alternat
 **The rewrite does not establish a RAM or FPS improvement.** The clear measured benefit is the much smaller application distribution. Loaded-page memory was approximately unchanged; launcher memory was higher. The report includes frequent diagnostic sampling, attached test tooling, different Chromium runtime versions, and shared memory pages that may be counted more than once. It is not a Foundry gameplay benchmark. Actual scene performance still depends on the GPU, maps, modules, animations, network, and host.
 
 ## Rendering controls
+
+Version 0.3.0 adds **Canvas FPS limit** in Performance: 30, 60, 90, 120, 144, 165, 180, 240, and uncapped. Apply it after joining a V14 world. It changes the live canvas ticker through PixiJS's public `maxFPS` property, rather than writing values beyond Foundry's registered settings range. **Restore FPS limit** restores the original ticker value. The override applies to the loaded canvas; scene changes, reloads, or graphics changes may reset it. It does not change stored Foundry settings or disable browser synchronization. Actual FPS depends on the display, scene, and GPU; 240 FPS is a target, not a guaranteed result. [PixiJS ticker documentation](https://pixijs.com/8.x/guides/components/ticker).
+
+## Multi-monitor layouts
+
+Move the main window and Foundry pop-outs to your preferred monitors. Normal window positions and sizes are saved automatically, with writes debounced while moving/resizing. When you reopen the client or a pop-out, its saved placement is adjusted for the current displays and DPI scaling. Missing displays fall back to an available monitor, with the window kept on screen. Maximized/fullscreen/minimized states do not replace the saved normal geometry.
+
+Named pop-outs are matched by their window name and session join link; unnamed windows use opening order. Reopen sheets through Foundry to restore them—the client does not automatically open game documents. **Preferences → Multi-monitor layout → Bring pop-outs to this monitor** moves open normal pop-outs onto the main window's display. Real Foundry sheet compatibility and physical monitor hot-plug testing remain to be verified; native reopen/restart restoration and simulated monitor/DPI changes are tested.
+
+## Foundry rendering presets
 
 Presets use only registered Foundry V14 **client** settings. Choosing a preset in the launcher stores a preference; it takes effect only after clicking **Apply to current world**.
 

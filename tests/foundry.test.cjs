@@ -2,6 +2,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const vm = require('node:vm');
+const adapter = require('node:fs').readFileSync(require('node:path').join(__dirname,'../src/foundry-adapter.js'),'utf8');
 const { readScript, settingsScript } = require('../src/foundry.cjs');
 
 function mockGame(options = {}) {
@@ -13,6 +14,7 @@ function mockGame(options = {}) {
     ['core.pixelRatioResolutionScaling', { scope: 'client', type: Boolean }]
   ]);
   const context = vm.createContext({ game: { ready: true, version: '14.368', settings: { settings: definitions, get: (_ns, key) => values[key], set: async (_ns, key, value) => { if (options.fail === key) throw new Error('fail'); writes.push([key, value]); values[key] = value; } } }, canvas: { app: { ticker: { FPS: 59.8 }, renderer: { gl: { texImage3D() {} } } } }, Number, Boolean });
+  context.canvas.app.ticker.maxFPS = 60;
   return { values, writes, context };
 }
 test('diagnostics report real canvas values without creating a WebGL context', () => {
@@ -20,6 +22,17 @@ test('diagnostics report real canvas values without creating a WebGL context', (
   const report = vm.runInContext(readScript(), game.context);
   assert.equal(report.fps, 60); assert.equal(report.webgl, 'WebGL 2'); assert.equal(report.version, '14.368'); assert.equal(game.writes.length, 0);
   assert.equal(vm.runInNewContext(readScript()).ready, false);
+});
+test('240 FPS and uncapped overrides are reversible and leave stored Foundry settings untouched', () => {
+  const game=mockGame();
+  const cap=limit=>vm.runInContext(adapter+';changeFrameLimit('+JSON.stringify(limit)+')',game.context);
+  assert.equal(cap(240).maxFPS,240);
+  assert.equal(cap(0).maxFPS,0);
+  assert.equal(cap(null).maxFPS,60);
+  assert.equal(game.values.maxFPS,60);
+  assert.throws(()=>cap(999),/supported FPS/);
+  game.context.canvas.app.ticker={FPS:60};
+  assert.throws(()=>cap(240),/supported canvas/);
 });
 test('profiles skip world settings and unsupported keys', async () => {
   const game = mockGame({ worldFPS: true });

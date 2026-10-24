@@ -1,5 +1,24 @@
 'use strict';
 
+function changeFrameLimit(limit) {
+  if (!globalThis.game?.ready || !/^14(?:\.|$)/.test(String(game.version))) throw new Error('Join a Foundry V14 world first.');
+  const ticker = globalThis.canvas?.app?.ticker;
+  if (!ticker || typeof ticker.maxFPS !== 'number' || !Number.isFinite(ticker.maxFPS)) throw new Error('This world does not expose a supported canvas FPS limiter.');
+  if (limit !== null && ![0,30,60,90,120,144,165,180,240].includes(limit)) throw new Error('Choose a supported FPS limit.');
+  const key = Symbol.for('foundry-client.frame-limit-backups');
+  const backups = globalThis[key] ||= new WeakMap();
+  if (limit === null && !backups.has(ticker)) return {maxFPS:ticker.maxFPS,restored:true};
+  const original = ticker.maxFPS, first = !backups.has(ticker);
+  if (first) backups.set(ticker, original);
+  const target = limit === null ? backups.get(ticker) : limit;
+  try {
+    ticker.maxFPS = target;
+    if (Math.abs(ticker.maxFPS - target) > 0.01) throw new Error('The canvas did not accept that FPS limit.');
+  } catch (error) { ticker.maxFPS = original; if(first)backups.delete(ticker); throw error; }
+  if (limit === null) backups.delete(ticker);
+  return {maxFPS:ticker.maxFPS,restored:limit === null};
+}
+
 function readFoundry() {
   const g = globalThis.game;
   const c = globalThis.canvas;

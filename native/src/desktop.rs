@@ -1,5 +1,6 @@
 use crate::{
     core::{self, Session, Store},
+    layouts,
     metrics::Metrics,
     updates,
     web::{self, Trust},
@@ -31,6 +32,7 @@ use wry::{
 };
 
 pub struct PopupRequest {
+    pub name: String,
     pub generation: u64,
     pub profile: String,
     pub environment: ICoreWebView2Environment,
@@ -81,8 +83,10 @@ struct Rpc {
 struct Popup {
     view: WebView,
     _window: Window,
+    layout_key: String,
 }
 enum Work {
+    FrameLimit,
     Frame,
     Diagnostic(Value),
     ProfileRead(Option<String>),
@@ -117,6 +121,7 @@ struct Client {
     update_result: Option<std::sync::mpsc::Receiver<core::Result<Option<updates::Release>>>>,
     update_deadline: Option<Instant>,
     pending: HashMap<u64, Pending>,
+    layout_deadline: Option<Instant>,
     proxy: EventLoopProxy<NativeEvent>,
     testing: bool,
     exiting: bool,
@@ -200,18 +205,25 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         update_result: None,
         update_deadline: None,
         pending: HashMap::new(),
+        layout_deadline: None,
         proxy,
         testing,
         exiting: false,
         _instance: instance,
         _context: context,
     };
+    if let Some(saved) = client.store.data.layouts.get("main") {
+        SelfWindow::restore(&client.window, saved);
+    }
     client.layout();
     if client.store.data.preferences.auto_check_updates {
         client.check_updates();
     }
     event_loop.run(move |event, target, flow| {
         let mut deadline = client.pending.values().map(|p| p.deadline).min();
+        if let Some(layout) = client.layout_deadline {
+            deadline = Some(deadline.map_or(layout, |d| d.min(layout)));
+        }
         if client.update_result.is_some() {
             let next = Instant::now() + Duration::from_millis(200);
             deadline = Some(deadline.map_or(next, |d| d.min(next)));
@@ -227,11 +239,13 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                         client.exiting = true;
                     }
                 }
+                WindowEvent::Moved(_) => client.remember_main(),
                 WindowEvent::Resized(_)
                 | WindowEvent::ScaleFactorChanged { .. }
                 | WindowEvent::Focused(_) => {
                     client.layout();
                     client.power();
+                    client.remember_main();
                 }
                 _ => (),
             },
@@ -241,19 +255,25 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 if let Some(popup) = client.popouts.get(&window_id) {
                     match event {
                         WindowEvent::CloseRequested => {
+                            client.remember_popup(window_id);
                             client.popouts.remove(&window_id);
                         }
+                        WindowEvent::Moved(_) => client.remember_popup(window_id),
                         WindowEvent::Resized(size) => {
                             let _ = popup.view.set_bounds(Rect {
                                 position: PhysicalPosition::new(0, 0).into(),
                                 size: size.into(),
                             });
+                            client.remember_popup(window_id);
                         }
                         _ => (),
                     }
                 }
             }
             Event::MainEventsCleared => {
+                if client.layout_deadline.is_some_and(|d| Instant::now() >= d) {
+                    client.flush_layouts();
+                }
                 let result = client
                     .update_result
                     .as_ref()
@@ -296,6 +316,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             _ => (),
         }
         if client.exiting {
+            client.remember_main();
             client.release();
             client.power();
             *flow = ControlFlow::Exit;
@@ -304,6 +325,30 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 impl Client {
+    fn remember_main(&mut self) {
+        if let Some(placement) = SelfWindow::capture(&self.window) {
+            self.store.data.layouts.insert("main".into(), placement);
+            self.layout_deadline = Some(Instant::now() + Duration::from_millis(500));
+        }
+    }
+    fn remember_popup(&mut self, id: WindowId) {
+        if let Some(popup) = self.popouts.get(&id)
+            && let Some(placement) = SelfWindow::capture(&popup._window)
+        {
+            self.store
+                .data
+                .layouts
+                .insert(popup.layout_key.clone(), placement);
+            self.layout_deadline = Some(Instant::now() + Duration::from_millis(500));
+        }
+    }
+    fn flush_layouts(&mut self) {
+        if self.layout_deadline.take().is_some()
+            && let Err(error) = self.store.write()
+        {
+            self.store.warning = Some(error);
+        }
+    }
     fn check_updates(&mut self) {
         if self.updates.status == "checking" {
             return;
@@ -422,6 +467,10 @@ impl Client {
         }
     }
     fn release(&mut self) {
+        for id in self.popouts.keys().copied().collect::<Vec<_>>() {
+            self.remember_popup(id);
+        }
+        self.flush_layouts();
         self.popouts.clear();
         self.game = None;
         self.active = None;
@@ -567,6 +616,7 @@ impl Client {
             return;
         }
         let result = result.and_then(|value| match pending.work {
+            Work::FrameLimit => Ok(Some(value)),
             Work::Diagnostic(mut metrics) => {
                 metrics["foundry"] = value;
                 Ok(Some(metrics))
@@ -675,6 +725,67 @@ impl Client {
     fn command(&mut self, request: &Rpc) -> core::Result<Option<Value>> {
         let input = &request.payload;
         let value = match request.action.as_str() {
+            #[cfg(feature = "test-driver")]
+            "test-layout" if self.testing => {
+                if input.is_object()
+                    && let Some(popup) = self.popouts.values().next()
+                {
+                    let mut p = SelfWindow::capture(&popup._window).ok_or("No normal pop-out.")?;
+                    p.x = 160;
+                    p.y = 120;
+                    p.width = 760;
+                    p.height = 500;
+                    SelfWindow::apply(&popup._window, &p);
+                }
+                json!(
+                    self.popouts
+                        .values()
+                        .map(|p| SelfWindow::capture(&p._window))
+                        .collect::<Vec<_>>()
+                )
+            }
+            "frame-limit" => {
+                if self
+                    .pending
+                    .values()
+                    .any(|p| !matches!(p.work, Work::Diagnostic(_) | Work::Frame))
+                {
+                    return Err("Wait for the current rendering operation to finish.".into());
+                }
+                if !input.is_null()
+                    && ![0, 30, 60, 90, 120, 144, 165, 180, 240]
+                        .iter()
+                        .any(|n| input == *n)
+                {
+                    return Err("Choose a supported FPS limit.".into());
+                }
+                self.begin_script(
+                    request.id,
+                    format!(
+                        "(()=>{{{};return changeFrameLimit({input});}})()",
+                        web::ADAPTER
+                    ),
+                    Work::FrameLimit,
+                )?;
+                return Ok(None);
+            }
+            "gather-windows" => {
+                for popup in self.popouts.values() {
+                    let mut placement = SelfWindow::capture(&popup._window)
+                        .ok_or("Restore minimized windows first.")?;
+                    let screen =
+                        SelfWindow::screen(&self.window).ok_or("No display is available.")?;
+                    placement.monitor = screen.name.clone();
+                    placement.monitor_x = screen.x;
+                    placement.x = screen.x;
+                    placement.monitor_y = screen.y;
+                    placement.y = screen.y;
+                    if let Some(fit) = placement.fit(&[screen]) {
+                        SelfWindow::apply(&popup._window, &fit);
+                    }
+                }
+                json!(true)
+            }
             "check-updates" => {
                 self.check_updates();
                 self.snapshot()
@@ -915,6 +1026,7 @@ impl Client {
                 }
             }
             NativeEvent::ClosePopup(id) => {
+                self.remember_popup(id);
                 self.popouts.remove(&id);
             }
             NativeEvent::Media(request) => {
@@ -946,12 +1058,25 @@ impl Client {
         request: &PopupRequest,
         target: &EventLoopWindowTarget<NativeEvent>,
     ) -> core::Result<()> {
+        let url = self
+            .active
+            .as_ref()
+            .ok_or("Connect to a game first.")?
+            .url
+            .as_str();
+        let layout_key = (0..64)
+            .map(|slot| layouts::key(url, &request.name, slot))
+            .find(|key| !self.popouts.values().any(|p| p.layout_key == *key))
+            .ok_or("Close an unused pop-out first.")?;
         let window = WindowBuilder::new()
             .with_title("Foundry · Pop-out")
             .with_inner_size(LogicalSize::new(1000., 760.))
             .with_theme(Some(tao::window::Theme::Dark))
             .build(target)
             .map_err(|e| e.to_string())?;
+        if let Some(saved) = self.store.data.layouts.get(&layout_key) {
+            SelfWindow::restore(&window, saved);
+        }
         let id = window.id();
         let nav_trust = request.trust.clone();
         let nav_proxy = self.proxy.clone();
@@ -1000,10 +1125,72 @@ impl Client {
             Popup {
                 view,
                 _window: window,
+                layout_key,
             },
         );
         #[cfg(feature = "test-driver")]
         eprintln!("popup attached, total={}", self.popouts.len());
         Ok(())
+    }
+}
+
+struct SelfWindow;
+impl SelfWindow {
+    fn screen(window: &Window) -> Option<layouts::Screen> {
+        let m = window
+            .current_monitor()
+            .or_else(|| window.primary_monitor())?;
+        Some(layouts::Screen {
+            x: m.position().x,
+            y: m.position().y,
+            width: m.size().width,
+            height: m.size().height,
+            scale: m.scale_factor(),
+            name: m.name(),
+        })
+    }
+    fn capture(window: &Window) -> Option<layouts::Placement> {
+        if window.is_minimized() || window.is_maximized() || window.fullscreen().is_some() {
+            return None;
+        }
+        let position = window.outer_position().ok()?;
+        let size = window.inner_size();
+        let m = Self::screen(window)?;
+        let saved = layouts::Placement {
+            x: position.x,
+            y: position.y,
+            width: size.width,
+            height: size.height,
+            scale: window.scale_factor(),
+            monitor: m.name,
+            monitor_x: m.x,
+            monitor_y: m.y,
+        };
+        saved.valid().then_some(saved)
+    }
+    fn apply(window: &Window, p: &layouts::Placement) {
+        window.set_minimized(false);
+        window.set_maximized(false);
+        window.set_inner_size(PhysicalSize::new(p.width, p.height));
+        window.set_outer_position(PhysicalPosition::new(p.x, p.y));
+    }
+    fn restore(window: &Window, p: &layouts::Placement) {
+        let mut monitors: Vec<_> = window.available_monitors().collect();
+        let primary = window.primary_monitor();
+        monitors.sort_by_key(|m| Some(m.clone()) != primary);
+        let screens: Vec<_> = monitors
+            .into_iter()
+            .map(|m| layouts::Screen {
+                x: m.position().x,
+                y: m.position().y,
+                width: m.size().width,
+                height: m.size().height,
+                scale: m.scale_factor(),
+                name: m.name(),
+            })
+            .collect();
+        if let Some(p) = p.fit(&screens) {
+            Self::apply(window, &p);
+        }
     }
 }

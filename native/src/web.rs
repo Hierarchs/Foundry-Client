@@ -243,6 +243,15 @@ pub fn wire(
                 let deferral = args.GetDeferral()?;
                 let _ = popup_proxy.send_event(NativeEvent::Popup(PopupRequest {
                     generation,
+                    name: args
+                        .cast::<ICoreWebView2NewWindowRequestedEventArgs2>()
+                        .ok()
+                        .and_then(|a| {
+                            let mut name = PWSTR::null();
+                            a.Name(&mut name).ok()?;
+                            Some(take_pwstr(name))
+                        })
+                        .unwrap_or_default(),
                     profile: profile.clone(),
                     environment: environment.clone(),
                     args,

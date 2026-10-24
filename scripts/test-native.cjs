@@ -52,7 +52,7 @@ const values=JSON.parse(localStorage.getItem('settings')||'{"performanceMode":2,
 const definitions=new Map([['core.performanceMode',{scope:'client',type:Number,choices:{0:'Low',1:'Medium',2:'High'}}],['core.maxFPS',{scope:'client',type:Number,range:{min:0,max:120}}],['core.pixelRatioResolutionScaling',{scope:'client',type:Boolean}]]);
 window.game={ready:true,version:'14.368',settings:{settings:definitions,get:(_,k)=>values[k],set:async(_,k,v)=>{await new Promise(r=>setTimeout(r,20));values[k]=v;localStorage.setItem('settings',JSON.stringify(values));return v}}};
 const gl=document.querySelector('#map').getContext('webgl2');
-window.canvas={app:{ticker:{FPS:58},renderer:{gl}}};
+window.canvas={app:{ticker:{FPS:58,maxFPS:60},renderer:{gl}}};
 if(gl){gl.clearColor(.12,.18,.22,1);gl.clear(gl.COLOR_BUFFER_BIT)}
 document.querySelector('#popout').onclick=()=>{const w=window.open('about:blank','sheet');window.detached=w;if(w)w.document.body.textContent='Detached native sheet';};
 document.cookie='native-cookie=kept; Max-Age=86400; SameSite=Lax';
@@ -95,6 +95,17 @@ async function verify() {
     await page.locator('#live-fps').click();
     await expect(page.locator('#live-fps')).toHaveText('58 FPS');
     await page.locator('#quick-performance').click();
+    await page.locator('#frame-limit').selectOption('240');
+    await page.locator('#apply-frame-limit').click();
+    await expect(page.locator('#frame-limit-result')).toContainText('240 FPS');
+    expect(await game.evaluate(()=>canvas.app.ticker.maxFPS)).toBe(240);
+    await page.locator('#frame-limit').selectOption('0');
+    await page.locator('#apply-frame-limit').click();
+    await expect(page.locator('#frame-limit-result')).toContainText('Uncapped canvas');
+    expect(await game.evaluate(()=>canvas.app.ticker.maxFPS)).toBe(0);
+    await page.locator('#restore-frame-limit').click();
+    await expect(page.locator('#frame-limit-result')).toContainText('restored');
+    expect(await game.evaluate(()=>canvas.app.ticker.maxFPS)).toBe(60);
     await page.locator('input[name="performance-profile"][value="efficiency"]').check();
     await page.locator('#apply-profile').click();
     await expect(page.locator('#profile-result')).toContainText('Efficiency applied (3 settings)');
@@ -121,6 +132,15 @@ async function verify() {
     const targets = await application.browser.newBrowserCDPSession();
     const popupTarget = (await targets.send('Target.getTargets')).targetInfos.find(t=>t.url==='about:blank');
     expect(popupTarget).toBeTruthy();
+    await page.evaluate(()=>window.client.invoke('test-layout',{}));
+    await expect.poll(()=>page.evaluate(()=>window.client.invoke('test-layout').then(p=>p[0]?.width))).toBe(760);
+    const savedPlacement=(await page.evaluate(()=>window.client.invoke('test-layout')))[0];
+    await game.evaluate(()=>window.detached.close());
+    await expect.poll(()=>page.evaluate(()=>window.client.invoke('test-layout').then(p=>p.length))).toBe(0);
+    await game.locator('#popout').click();
+    await expect.poll(()=>page.evaluate(()=>window.client.invoke('test-layout').then(p=>p[0]?.width))).toBe(savedPlacement.width);
+    expect((await page.evaluate(()=>window.client.invoke('test-layout')))[0].height).toBe(savedPlacement.height);
+    await expect.poll(()=>JSON.parse(fs.readFileSync(path.join(data,'client-settings.json'),'utf8')).layouts && Object.keys(JSON.parse(fs.readFileSync(path.join(data,'client-settings.json'),'utf8')).layouts).length).toBeGreaterThan(1);
     await page.locator('#library-toggle').click();
     await page.getByRole('button',{name:'Session library',exact:true}).click();
     await page.getByRole('button',{name:'Join Second campaign',exact:true}).click();
@@ -145,6 +165,13 @@ async function verify() {
     await expect(page.locator('#retry')).toBeVisible();
     await page.locator('#disconnect').click();
     const diagnostic=await page.evaluate(()=>window.client.invoke('diagnostics'));
+    await application.close();application=await launch(data);({page,context}=application);
+    await page.getByRole('button',{name:'Join Imported campaign',exact:true}).click();
+    await expect.poll(()=>{game=context.pages().find(p=>p.url().startsWith(base+'/join'));return !!game;}).toBe(true);
+    await game.waitForFunction(()=>game?.ready);
+    await game.locator('#popout').click();
+    await expect.poll(()=>page.evaluate(()=>window.client.invoke('test-layout').then(p=>p[0]?.width))).toBe(savedPlacement.width);
+    expect((await page.evaluate(()=>window.client.invoke('test-layout')))[0].height).toBe(savedPlacement.height);
     console.log(JSON.stringify({nativeIntegration:'passed',runtime:state.runtime,diagnostic},null,2));
   } catch(error) {
     if(application) {

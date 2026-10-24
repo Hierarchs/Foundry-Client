@@ -1,6 +1,6 @@
 [package]
 name = "foundry-client"
-version = "0.2.2"
+version = "0.3.0"
 edition = "2024"
 description = "Native Rust desktop client for Foundry VTT V14"
 build = "build.rs"

@@ -116,6 +116,7 @@ pub struct Data {
     pub sessions: Vec<Session>,
     pub preferences: Preferences,
     pub backups: BTreeMap<String, BTreeMap<String, Value>>,
+    pub layouts: BTreeMap<String, crate::layouts::Placement>,
 }
 pub fn profiles() -> Value {
     json!({
@@ -213,6 +214,18 @@ impl Store {
             for (key, value) in backups {
                 if key.starts_with("persist:game-") && key.len() < 80 {
                     data.backups.insert(key.clone(), settings_values(value));
+                }
+            }
+        }
+        if let Some(layouts) = saved["layouts"].as_object() {
+            for (key, value) in layouts.iter().take(100) {
+                if (key == "main"
+                    || (key.len() == 64 && key.chars().all(|c| c.is_ascii_hexdigit())))
+                    && let Ok(placement) =
+                        serde_json::from_value::<crate::layouts::Placement>(value.clone())
+                    && placement.valid()
+                {
+                    data.layouts.insert(key.clone(), placement);
                 }
             }
         }
