@@ -5,3 +5,4 @@ playwright-report/
 .test-data/
 *.log
 .DS_Store
+native/target/

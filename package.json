@@ -1,7 +1,7 @@
 {
   "name": "foundry-client",
-  "version": "0.1.0",
-  "description": "A focused, GPU-accelerated desktop client for Foundry Virtual Tabletop and Sqyre hosting.",
+  "version": "0.2.0",
+  "description": "Native Rust and WebView2 desktop client for Foundry Virtual Tabletop V14 and Sqyre hosting.",
   "author": "Hierarchs",
   "private": true,
   "main": "src/main.cjs",
@@ -9,14 +9,21 @@
     "node": ">=24"
   },
   "scripts": {
-    "start": "electron .",
+    "start": "node scripts/rust.cjs run --manifest-path native/Cargo.toml --locked",
+    "start:electron": "electron .",
+    "build": "node scripts/rust.cjs build --manifest-path native/Cargo.toml --release --locked",
+    "test:rust": "node scripts/rust.cjs test --manifest-path native/Cargo.toml --locked",
     "test": "node --test tests/*.test.cjs",
-    "test:e2e": "playwright test",
-    "test:packaged": "node scripts/smoke-packaged.cjs",
+    "test:e2e": "node scripts/test-native-runner.cjs",
+    "test:electron": "playwright test",
+    "benchmark": "node scripts/benchmark-hosts.cjs",
+    "test:packaged:electron": "node scripts/smoke-packaged.cjs",
     "check": "node scripts/check.cjs",
-    "pack": "electron-builder --dir",
-    "dist": "electron-builder --win nsis portable",
-    "dist:portable": "electron-builder --win portable"
+    "pack": "node scripts/rust.cjs build --manifest-path native/Cargo.toml --release --locked",
+    "pack:electron": "electron-builder --dir",
+    "dist": "node scripts/package-native.cjs",
+    "dist:electron": "electron-builder --win nsis portable",
+    "dist:portable": "node scripts/package-native.cjs"
   },
   "devDependencies": {
     "@playwright/test": "1.64.1",

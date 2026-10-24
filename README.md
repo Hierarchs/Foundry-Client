@@ -1,89 +1,122 @@
-# Foundry Client
+# Foundry Client — Rust edition
 
-A dedicated Windows desktop client for **Foundry Virtual Tabletop V14**, including games hosted on **Sqyre**. Paste any game's join link, save multiple sessions, and switch between them from your library.
+A dedicated **Windows 10/11 x64 client for Foundry Virtual Tabletop V14**, including games hosted on **Sqyre**. Version 0.2 replaces the Electron/Node desktop host with Rust and uses Microsoft's installed **Evergreen WebView2** renderer. The launcher remains lightweight HTML/CSS/JavaScript embedded in the executable.
 
-This is a client for an existing server. You still start and manage your hosted game on Sqyre. No Foundry server, license, system, module, or game content is bundled.
+## Run it
 
-## Play
+Download/extract the portable archive from `release/rust/`, then run **Foundry Client.exe**. Alternatively, use **Foundry-Client-Rust-Setup-0.2.0-x64.exe**. The installer creates separate Rust-edition shortcuts and leaves an existing Electron installation intact.
 
-1. Open **Foundry Client** (the portable `.exe` or installed app).
-2. Start the world on Sqyre and copy its **game join link**. A hosting dashboard URL is not the game join link.
-3. Paste the link under **Join a session**. Give it a name if you want, and keep **Save to my session library** checked to return later.
-4. Click **Join session**, then sign in through your host / Foundry as usual.
-5. Add more links with **New session**. Use **Sessions** or **Ctrl+Shift+L** while playing to switch worlds.
+1. Start your game on Sqyre and copy its **game join link**.
+2. Paste it into **Join a session**, optionally name it, and click **Join session**.
+3. Keep **Save to my session library** checked to return later. Use **New session** to add different links.
+4. Sign in through your host / Foundry as usual.
+5. After joining a world, open **Performance** to apply a rendering profile.
 
-The full URL, including invitation query strings and paths, is preserved. Links must use HTTPS; local development servers can use HTTP on `localhost`, `127.0.0.1`, or `[::1]`. Sqyre's first-party `sqyre.app` navigation remains in the client. Other sign-in redirects require a native confirmation. Cross-site pop-up links can be opened in your normal browser. A provider that forbids embedded browsers may require additional integration; external-browser logins are not automatically transferred into the client.
+This application is a client for an existing server. It does not include or host Foundry, start Sqyre servers, or bundle licensed game content. A hosting dashboard URL is not necessarily a game join link. Authentication providers that prohibit embedded browsers may need additional integration; logging in through an external browser does not automatically transfer its cookies into this client.
 
-## Performance
+**Microsoft Edge WebView2 Runtime is required.** It is normally present on modern Windows installations; [download it from Microsoft](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) if needed. Rust, Node.js, and Visual Studio are not required to run the compiled client. These builds are unsigned and do not have automatic app updates; WebView2 receives its own Microsoft updates.
 
-- Current Electron / Chromium runtime with **hardware acceleration enabled**, a preference for the dedicated GPU on hybrid systems, and normal GPU driver safety checks. The GPU preference can be changed under Preferences and takes effect after restarting.
-- **One active game**. Switching or disconnecting closes the old renderer and its pop-out windows.
-- Persistent Chromium disk / code caching and server-specific browser sessions retain assets and logins across visits.
-- Background animation throttling, a visible-window screen-awake option, fullscreen, and a toolbar-free focus mode.
-- On-demand diagnostics report Foundry's canvas ticker FPS, WebGL context, aggregate client memory, and normalized CPU usage. Diagnostics poll while their page is visible or when the optional **FPS** game-toolbar monitor is enabled. The diagnostics page hides the game, which can pause rendering; use the toolbar monitor to measure during play.
+## What Rust changes
 
-The **Performance** page offers opt-in Foundry V14 client settings:
+- Removes the Electron/Node host and the Chromium runtime bundled with the old application. The Rust release executable is about **1.4 MiB**, excluding the separately installed WebView2 runtime and dependency notices.
+- Uses one WebView2 environment with isolated browser profiles per server origin. Switching sessions drops the old game view and its pop-outs while retaining cached assets and supported login cookies.
+- Uses Rust for URL validation, atomic settings writes, window lifetime, cache clearing, diagnostics, and rendering-profile backups.
+- Uses an event loop that sleeps when idle. Full process diagnostics run only when requested. The optional gameplay FPS monitor reads only the canvas ticker, without scanning processes.
+- Requests the dedicated GPU when enabled. Hardware acceleration, browser sandboxing, certificate verification, and GPU safety checks remain enabled.
+- Requests lower WebView2 memory targets for inactive views and minimized windows. Visible gameplay keeps its normal memory target.
+
+### Measured limits
+
+The saved [comparison report](benchmarks/host-overhead.json) uses three alternating runs per backend, fresh profiles, the same launcher, and a local static WebGL 2 test page. Each scenario takes five samples after warming up. These are medians of run medians on the development PC:
+
+| Summed process working set | Electron baseline | Rust / WebView2 |
+| --- | ---: | ---: |
+| Launcher | 363 MiB | 396 MiB |
+| Local WebGL test page | 465 MiB | 469 MiB |
+
+**The rewrite does not establish a RAM or FPS improvement.** The clear measured benefit is the much smaller application distribution. Loaded-page memory was approximately unchanged; launcher memory was higher. The report includes frequent diagnostic sampling, attached test tooling, different Chromium runtime versions, and shared memory pages that may be counted more than once. It is not a Foundry gameplay benchmark. Actual scene performance still depends on the GPU, maps, modules, animations, network, and host.
+
+## Rendering controls
+
+Presets use only registered Foundry V14 **client** settings. Choosing a preset in the launcher stores a preference; it takes effect only after clicking **Apply to current world**.
 
 | Profile | Foundry quality | FPS cap | Pixel ratio scaling |
-| --- | --- | --- | --- |
-| Efficiency | Low (0) | 30 | Off |
-| Balanced | Medium (1) | 60 | Off |
-| Quality | High (2) | 60 | On |
+| --- | --- | ---: | --- |
+| Efficiency | Low | 30 | Off |
+| Balanced | Medium | 60 | Off |
+| Quality | High | 60 | On |
 
-Choosing a profile in the launcher saves your preference. **It is only applied when you click Apply to current world after joining a world.** No world settings or other players' settings are modified. The adapter checks that each setting exists with `client` scope and validates registered choices / ranges. Unsupported settings are skipped. Original values are backed up before the first change and can be restored. Backups survive a client restart. Foundry may request a reload to finish applying settings.
+Original values are saved before the first change and can be restored across a client restart. Unsupported settings are skipped. No world settings or other players' settings are changed. Reload if Foundry requests it. These controls are shared with the retained Electron adapter and tested against asynchronous setting changes.
 
-This wrapper reduces browser clutter and provides deliberate rendering controls. It does **not** claim a measured FPS improvement over Chrome or Edge. Your GPU, maps, animations, modules, internet connection, and server still matter. Sqyre server performance is controlled by Sqyre. The Foundry FPS value comes from its canvas ticker and is not an end-to-end frame presentation benchmark.
-
-## Shortcuts
+The Performance page hides the game, which can pause its rendering. Use **FPS** in the game toolbar to measure during play. Canvas ticker FPS is not an end-to-end presentation benchmark.
 
 | Action | Shortcut |
 | --- | --- |
 | Fullscreen | F11 |
-| Hide / restore client toolbar | Ctrl+Shift+F |
+| Hide / restore toolbar | Ctrl+Shift+F |
 | Session library | Ctrl+Shift+L |
 
-Focus mode hides the toolbar; **Ctrl+Shift+F** restores it. The library can remain open while your game runs. Use **Disconnect** to release the game's resources. Foundry's same-origin and blank-document pop-out windows are supported with the same sandbox restrictions as the game.
+The library can stay open while the game remains connected. **Disconnect** releases the game view. Foundry same-origin and blank-document pop-outs retain their opener and server profile. Camera/microphone requests require enabling the preference and approving a native permission prompt. Background throttling and GPU preference changes require a restart; the screen-awake and memory-target choices update immediately.
 
-## Local development
+## Saved sessions and migration
 
-Requires Windows 10 / 11 x64 and Node.js 24 or newer. An accelerated GPU supporting WebGL 2 and at least 8 GB system RAM are recommended by Foundry for clients (16 GB recommended).
+On first launch, the Rust edition imports saved links and preferences from the previous Electron file, without changing it:
+
+- Previous store: `%APPDATA%/foundry-client/client-settings.json`
+- Rust store: `%APPDATA%/foundry-client/native/client-settings.json`
+- Native browser profiles/cache: `%LOCALAPPDATA%/FoundryClient/WebView2/`
+
+Browser logins and Foundry browser settings use the new WebView2 profiles, so sign in again and apply the desired rendering preset. Old rendering backups belong to the old browser and remain in its store; new native backups are captured before changing the new browser's settings. Import happens once and never overwrites an existing native store.
+
+Complete join URLs, including paths, invitation tokens, and fragments, are retained. Links are private local bookmarks saved in plain text. Different origins have separate login and asset storage; worlds on the same origin share it. Clearing **Asset cache** removes only the selected profile's disk cache, preserving login storage and settings. Corrupt settings are preserved in recovery copies.
+
+## Development and verification
+
+Install stable Rust, Visual Studio C++ build tools with a Windows SDK, and WebView2. Node.js 24+ is used for the development/test/package scripts. The frontend needs no compilation or framework.
 
 ```powershell
 npm ci
-# If your npm configuration blocks Electron's install script:
-node node_modules/electron/install.js
-npm start
+npm start                 # Rust app
+npm run build             # Optimized native release, no test driver
+npm run test:rust         # Native validation/storage/migration tests
+npm test                  # Shared adapter and legacy compatibility unit tests
+npm run check             # JavaScript syntax checks
+npm run test:e2e          # Real Rust app + local integration fixture
+npm run dist              # Rust executable, installer, portable zip, notices, hashes
 ```
 
-The application has no frontend framework and no production npm dependencies. The launcher uses local HTML, CSS, and JavaScript; a `WebContentsView` displays the game separately.
+The wrapper script finds Cargo in `%USERPROFILE%/.cargo/bin` if the current shell has not refreshed PATH. Cargo can also be used directly:
 
 ```powershell
-npm run check       # JavaScript syntax
-npm test            # URL, storage, scope, and setting rollback tests
-npm run test:e2e    # Real Electron integration tests against a local fixture
-npm run pack        # Unpacked app under release/win-unpacked/
-npm run dist        # Windows x64 installer and portable executable
-npm run test:packaged # Smoke check the built app (uses its normal local app-data folder)
+cargo build --manifest-path native/Cargo.toml --release --locked
+cargo test --manifest-path native/Cargo.toml --locked
 ```
 
-Builds are written to `release/`. `Foundry-Client-Setup-0.1.0-x64.exe` is the installer; `Foundry-Client-0.1.0-x64-win.exe` is the portable app. The generated binaries are unsigned. Windows may show the publisher as unknown. Code signing and automatic updates are not configured; update the Electron dependency regularly and rebuild to receive Chromium security fixes. The repository workflow verifies and builds Windows artifacts without publishing a release.
+Release builds use optimization, thin LTO, a static C runtime, and stripped symbols. The `test-driver` Cargo feature enables local-only CDP test controls; **production packaging builds without it**. Native integration checks cover migrated sessions, multiple links, WebGL 2, no game IPC/Node bridge, asynchronous presets, restart restore, persistent cookies, pop-outs, cache retention, and unreachable-host recovery. They use a mock world, not licensed Foundry code. A real V14 world on Sqyre is still needed for host/module compatibility verification.
 
-Integration tests use a small local mock world to verify the wrapper, including multiple sessions, storage persistence, sandboxing, profile application / restoration, pop-outs, and failure recovery. **A real licensed Foundry V14 world on Sqyre is still required for end-to-end host and module compatibility verification.** The tests do not establish performance gains. No production Sqyre credentials or game links are included.
+The GitHub workflow builds Rust artifacts and runs syntax checks, shared unit tests, native unit tests, formatting, and Clippy. Native GUI integration tests require a Windows desktop session and WebGL-capable renderer and are run locally. The Electron implementation is retained for comparisons and compatibility checks:
 
-## Storage and permissions
+```powershell
+npm run start:electron
+npm run test:electron
+# Optimized native test-driver binary for the repeatable overhead comparison:
+cargo build --manifest-path native/Cargo.toml --release --features test-driver --locked
+$env:FOUNDRY_NATIVE_TEST_EXE = (Resolve-Path native/target/release/foundry-client.exe).Path
+npm run benchmark
+# Build production again before distributing:
+npm run dist
+```
 
-Settings are stored in `%APPDATA%/foundry-client/client-settings.json`. Browser partitions live alongside that file and are isolated by server origin. Worlds on the same origin share Foundry client settings and login cookies, just as they would in the same browser. The portable app also uses this user-data directory; it does not store logins beside its executable.
+## Remote-content isolation
 
-Session URLs are saved as local bookmarks in plain text. Invitation tokens in URLs remain private data. Credentials entered into a game remain in Chromium's session storage / cookies as directed by the host. The client does not collect telemetry, send analytics, or export passwords. Clearing **Asset cache** removes only HTTP assets and retains login storage and settings.
-
-Remote game pages receive no Node.js access, preload script, IPC API, or filesystem bridge. Context isolation, OS sandboxing, web security, certificate checks, and mixed-content protection remain enabled. Permissions are denied by default except fullscreen and sanitized clipboard writes for trusted game origins. Camera / microphone requests require enabling the preference and approving a native request. Downloads use a save dialog. External URLs are validated before reaching the OS browser. The local launcher has its own restricted content security policy and sender-validated IPC.
+Only the embedded local launcher has an IPC handler, validated against its exact local origin. Game pages and pop-outs get no Node runtime, custom IPC handler, filesystem bridge, or host objects. Native code executes only fixed, bundled Foundry adapter scripts in the game. External links and new sign-in origins require a native confirmation; only HTTPS URLs and loopback HTTP are accepted. OS commands and custom-protocol URLs cannot be launched by game links. Test debugging ports and test data overrides are unavailable in a normal production build.
 
 ## References
 
-- [Foundry client requirements](https://foundryvtt.com/article/requirements/)
-- [Foundry rendering and client settings](https://foundryvtt.com/article/settings/)
-- [Foundry V14 performance mode constants](https://foundryvtt.com/api/v14/variables/CONST.CANVAS_PERFORMANCE_MODES.html)
-- [Foundry V14 ClientSettings API](https://foundryvtt.com/api/v14/classes/foundry.helpers.ClientSettings.html)
-- [Electron security guidance](https://www.electronjs.org/docs/latest/tutorial/security)
+- [Foundry requirements](https://foundryvtt.com/article/requirements/)
+- [Foundry settings](https://foundryvtt.com/article/settings/)
+- [Foundry V14 client-settings API](https://foundryvtt.com/api/v14/classes/foundry.helpers.ClientSettings.html)
+- [WebView2 performance guidance](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/performance)
+- [Wry native webview documentation](https://docs.rs/wry/latest/wry/)
 
-Independent project; not affiliated with Foundry Gaming, LLC or Sqyre. Foundry Virtual Tabletop and Sqyre are their respective owners' names and trademarks.
+Independent project; not affiliated with Foundry Gaming, LLC or Sqyre. Names and trademarks belong to their respective owners. Dependency license notices are included with the distribution.

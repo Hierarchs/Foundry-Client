@@ -1,0 +1,151 @@
+{
+  "method": "Three alternating runs per backend, fresh browser profiles, same 1440×940 launcher and local static WebGL 2 page. Each scenario warms up, then takes five samples 600 ms apart. Figures are medians of run medians. Memory sums process working sets (shared pages may be counted more than once). Test-driver/CDP attached to both. The Rust host is an optimized release with static CRT. Electron uses the same launcher and Electron 45.0.0. This measures wrapper overhead, not Foundry V14 gameplay or FPS.",
+  "summary": {
+    "rust": {
+      "launcher": {
+        "memoryMB": 396,
+        "cpuPercent": 0.4,
+        "processCount": 7
+      },
+      "game": {
+        "memoryMB": 469,
+        "cpuPercent": 0.4,
+        "processCount": 8
+      }
+    },
+    "electron": {
+      "launcher": {
+        "memoryMB": 363,
+        "cpuPercent": 0,
+        "processCount": 4
+      },
+      "game": {
+        "memoryMB": 465,
+        "cpuPercent": 0.1,
+        "processCount": 5
+      }
+    }
+  },
+  "runs": [
+    {
+      "backend": "rust",
+      "runtime": {
+        "app": "0.2.0",
+        "backend": "rust",
+        "chromium": "155.0.4283.62",
+        "engine": "WebView2",
+        "ramGB": 32,
+        "rust": "rustc 1.99.1 (58cf8f9c3 2026-10-13)"
+      },
+      "launcher": {
+        "memoryMB": 396,
+        "cpuPercent": 0.6,
+        "processCount": 7
+      },
+      "game": {
+        "memoryMB": 466,
+        "cpuPercent": 0.6,
+        "processCount": 8
+      }
+    },
+    {
+      "backend": "electron",
+      "runtime": {
+        "app": "0.2.0",
+        "electron": "45.0.0",
+        "chromium": "156.0.8078.48",
+        "ramGB": 31
+      },
+      "launcher": {
+        "memoryMB": 363,
+        "cpuPercent": 0,
+        "processCount": 4
+      },
+      "game": {
+        "memoryMB": 465,
+        "cpuPercent": 0.1,
+        "processCount": 5
+      }
+    },
+    {
+      "backend": "electron",
+      "runtime": {
+        "app": "0.2.0",
+        "electron": "45.0.0",
+        "chromium": "156.0.8078.48",
+        "ramGB": 31
+      },
+      "launcher": {
+        "memoryMB": 362,
+        "cpuPercent": 0,
+        "processCount": 4
+      },
+      "game": {
+        "memoryMB": 464,
+        "cpuPercent": 0,
+        "processCount": 5
+      }
+    },
+    {
+      "backend": "rust",
+      "runtime": {
+        "app": "0.2.0",
+        "backend": "rust",
+        "chromium": "155.0.4283.62",
+        "engine": "WebView2",
+        "ramGB": 32,
+        "rust": "rustc 1.99.1 (58cf8f9c3 2026-10-13)"
+      },
+      "launcher": {
+        "memoryMB": 396,
+        "cpuPercent": 0.4,
+        "processCount": 7
+      },
+      "game": {
+        "memoryMB": 469,
+        "cpuPercent": 0.4,
+        "processCount": 8
+      }
+    },
+    {
+      "backend": "rust",
+      "runtime": {
+        "app": "0.2.0",
+        "backend": "rust",
+        "chromium": "155.0.4283.62",
+        "engine": "WebView2",
+        "ramGB": 32,
+        "rust": "rustc 1.99.1 (58cf8f9c3 2026-10-13)"
+      },
+      "launcher": {
+        "memoryMB": 410,
+        "cpuPercent": 0.4,
+        "processCount": 7
+      },
+      "game": {
+        "memoryMB": 479,
+        "cpuPercent": 0.4,
+        "processCount": 8
+      }
+    },
+    {
+      "backend": "electron",
+      "runtime": {
+        "app": "0.2.0",
+        "electron": "45.0.0",
+        "chromium": "156.0.8078.48",
+        "ramGB": 31
+      },
+      "launcher": {
+        "memoryMB": 363,
+        "cpuPercent": 0.2,
+        "processCount": 4
+      },
+      "game": {
+        "memoryMB": 467,
+        "cpuPercent": 0.1,
+        "processCount": 5
+      }
+    }
+  ]
+}

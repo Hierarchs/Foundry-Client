@@ -9,3 +9,6 @@
 *.yml text eol=lf
 *.ps1 text eol=lf
 *.ico binary
+*.rs text eol=lf
+*.toml text eol=lf
+*.lock text eol=lf

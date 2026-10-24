@@ -1,4 +1,4 @@
-name: Verify and build Windows client
+name: Verify and build Rust Windows client
 on:
   push:
   pull_request:
@@ -14,19 +14,30 @@ jobs:
         with:
           node-version: 24
           cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            native/target
+          key: rust-${{ runner.os }}-${{ hashFiles('native/Cargo.lock', '.cargo/config.toml') }}
       - run: npm ci
-      - run: node node_modules/electron/install.js
       - run: npm run check
       - run: npm test
-      - run: npm run test:e2e
+      - run: npm run test:rust
+      - run: node scripts/rust.cjs fmt --manifest-path native/Cargo.toml -- --check
+      - run: node scripts/rust.cjs clippy --manifest-path native/Cargo.toml --all-targets --locked -- -D warnings
       - run: npm run dist
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
           GH_TOKEN: ''
       - uses: actions/upload-artifact@v4
         with:
-          name: Foundry-Client-Windows
-          path: release/*.exe
+          name: Foundry-Client-Rust-Windows
+          path: release/rust/*
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

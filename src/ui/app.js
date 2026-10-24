@@ -35,6 +35,11 @@ function render(next) {
   $('session-count').textContent = state.sessions.length;
   $('list-count').textContent = String(state.sessions.length).padStart(2, '0');
   $('runtime-short').textContent = `Chromium ${state.runtime.chromium.split('.')[0]}`;
+  $('client-version-label').textContent = `CLIENT ${state.runtime.app}`;
+  if (state.runtime.backend === 'rust') {
+    $('runtime-short').textContent = `Rust · WebView2 ${state.runtime.chromium.split('.')[0]}`;
+    $('background-throttle-description').textContent = 'Reduce browser memory while minimized. Changes to background timer throttling take effect after restarting the client.';
+  }
   for (const [key, value] of Object.entries(state.preferences)) $(`pref-${key}`).checked = value;
   if (previousActive !== state.active?.url) {
     previousActive = state.active?.url;
@@ -86,7 +91,7 @@ function renderCache() {
   $('clear-cache').disabled = !state.sessions.length;
 }
 function renderRuntime() {
-  const details = { 'Client version': state.runtime.app, 'Electron': state.runtime.electron, 'Chromium': state.runtime.chromium, 'System RAM': `${state.runtime.ramGB} GB`, 'Foundry version': 'Join a world to detect', 'Asset cache': 'Persistent', 'Background rendering': state.preferences.backgroundThrottle ? 'Throttled' : 'Unrestricted' };
+  const details = { 'Client version': state.runtime.app, ...(state.runtime.backend === 'rust' ? {'Native host': state.runtime.rust, 'Renderer': `WebView2 ${state.runtime.chromium}`} : {'Electron': state.runtime.electron, 'Chromium': state.runtime.chromium}), 'System RAM': `${state.runtime.ramGB} GB`, 'Foundry version': 'Join a world to detect', 'Asset cache': 'Persistent', 'Background rendering': state.preferences.backgroundThrottle ? 'Throttled' : 'Unrestricted' };
   $('runtime-details').replaceChildren();
   for (const [name, value] of Object.entries(details)) { const dt = element('dt', '', name), dd = element('dd', '', value); if (name === 'Foundry version') dd.id = 'foundry-version'; $('runtime-details').append(dt, dd); }
 }
@@ -94,6 +99,12 @@ async function refreshDiagnostics() {
   if (diagnosticBusy || document.hidden) return;
   diagnosticBusy = true;
   try {
+    if (state.runtime.backend === 'rust' && liveFPS && state.active && !state.overlay) {
+      const fps = await invoke('frame');
+      $('live-fps').textContent = `${fps ?? '—'} FPS`;
+      $('live-fps').title = 'Live canvas FPS. Open Performance for memory and CPU diagnostics. Click to stop monitoring.';
+      return;
+    }
     const d = await invoke('diagnostics');
     const accelerated = String(d.gpu.webgl2 || d.gpu.webgl || '').startsWith('enabled');
     $('engine-label').textContent = accelerated ? 'GPU acceleration active' : 'Check GPU acceleration';
@@ -163,7 +174,10 @@ $('focus-game').onclick = () => safely(async () => render(await invoke('focus'))
 $('fullscreen').onclick = () => safely(() => invoke('fullscreen'));
 $('open-sqyre').onclick = () => safely(() => invoke('sqyre'));
 for (const action of ['minimize', 'maximize', 'close']) $(action).onclick = () => safely(() => invoke(action));
-for (const key of ['backgroundThrottle', 'keepAwake', 'allowMedia', 'preferDedicatedGpu']) $(`pref-${key}`).onchange = () => safely(async () => { render(await invoke('preferences', { [key]: $(`pref-${key}`).checked })); toast(key === 'preferDedicatedGpu' ? 'GPU preference saved. Restart the client to apply.' : 'Preference saved.'); });
+document.querySelector('.titlebar').addEventListener('pointerdown', event => {
+  if (state?.runtime.backend === 'rust' && event.button === 0 && !event.target.closest('button')) safely(() => invoke('drag'));
+});
+for (const key of ['backgroundThrottle', 'keepAwake', 'allowMedia', 'preferDedicatedGpu']) $(`pref-${key}`).onchange = () => safely(async () => { render(await invoke('preferences', { [key]: $(`pref-${key}`).checked })); toast(key === 'preferDedicatedGpu' || (key === 'backgroundThrottle' && state.runtime.backend === 'rust') ? 'Preference saved. Restart the client to finish applying.' : 'Preference saved.'); });
 $('apply-profile').onclick = () => safely(async () => {
   result('profile-result', 'Applying rendering settings…');
   try {
@@ -191,6 +205,10 @@ safely(async () => {
   // A short-lived capability probe initializes Chromium's lazy GPU diagnostics.
   // Release it immediately; the actual game owns its own rendering context.
   const probe = document.createElement('canvas').getContext('webgl2');
+  if (state.runtime.backend === 'rust') {
+    const debug = probe?.getExtension('WEBGL_debug_renderer_info');
+    await invoke('graphics', {webgl2: !!probe, renderer: debug ? probe.getParameter(debug.UNMASKED_RENDERER_WEBGL) : ''});
+  }
   probe?.getExtension('WEBGL_lose_context')?.loseContext();
   await refreshDiagnostics();
 });
