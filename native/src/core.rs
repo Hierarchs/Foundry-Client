@@ -30,9 +30,8 @@ pub fn normalize_url(value: &str) -> Result<String> {
         format!("https://{value}")
     };
     let url = Url::parse(&candidate).map_err(|_| "That join link is not a valid URL.")?;
-    let loopback = matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
-    if url.scheme() != "https" && !(url.scheme() == "http" && loopback) {
-        return Err("Use an HTTPS join link. HTTP is supported only on localhost.".into());
+    if !matches!(url.scheme(), "http" | "https") {
+        return Err("Use an HTTP or HTTPS game join link.".into());
     }
     if url.host_str().is_none() || !url.username().is_empty() || url.password().is_some() {
         return Err("Use a join link without an embedded username or password.".into());
@@ -56,7 +55,10 @@ pub fn allowed_navigation(target: &str, initial: &str, extra: &HashSet<String>) 
         origin(&url)
             .ok()
             .is_some_and(|o| origin(initial).is_ok_and(|i| i == o) || extra.contains(&o))
-            || (sqyre(&url) && sqyre(initial))
+            || (url.starts_with("https://")
+                && initial.starts_with("https://")
+                && sqyre(&url)
+                && sqyre(initial))
     })
 }
 pub fn profile_name(url: &str) -> Result<String> {
@@ -403,7 +405,7 @@ mod tests {
             "file:///C:/Windows",
             "data:text/plain,test",
             "https://user:pass@host.com",
-            "http://remote.com",
+            "ftp://remote.com",
             "https://exa\nmple.com",
             "https://host/a b",
             "",
@@ -426,6 +428,49 @@ mod tests {
         ] {
             assert!(!allowed_navigation(target, initial, &HashSet::new()));
         }
+    }
+    #[test]
+    fn local_lan_vpn_and_hosted_join_links_are_supported() {
+        let cases: Vec<(String, String)> =
+            serde_json::from_str(include_str!("../../tests/fixtures/join-links.json")).unwrap();
+        for (input, expected) in cases {
+            assert_eq!(normalize_url(&input).unwrap(), expected, "{input}");
+        }
+        let initial = "http://10.8.0.12:30000/foundry/join";
+        assert!(allowed_navigation(
+            "http://10.8.0.12:30000/foundry/game",
+            initial,
+            &HashSet::new()
+        ));
+        assert!(!allowed_navigation(
+            "http://10.8.0.13:30000/foundry/game",
+            initial,
+            &HashSet::new()
+        ));
+        assert!(!allowed_navigation(
+            "http://10.8.0.12:30001/foundry/game",
+            initial,
+            &HashSet::new()
+        ));
+        assert!(allowed_navigation(
+            "https://login.example.com/",
+            initial,
+            &HashSet::from(["https://login.example.com".into()])
+        ));
+        assert_ne!(
+            profile_name(initial).unwrap(),
+            profile_name("https://10.8.0.12:30000/foundry/join").unwrap()
+        );
+        let directory = temporary();
+        let mut store = Store::load(directory.clone()).unwrap();
+        store
+            .save(&json!({"url": initial, "name": "VPN game"}))
+            .unwrap();
+        assert_eq!(
+            Store::load(directory.clone()).unwrap().data.sessions[0].url,
+            initial
+        );
+        cleanup(directory);
     }
     #[test]
     fn profiles_isolate_servers_and_match_legacy_cache_keys() {

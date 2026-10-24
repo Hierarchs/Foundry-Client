@@ -17,8 +17,7 @@ function normalizeJoinUrl(value) {
   let url;
   try { url = new URL(/^[a-z][a-z\d+.-]*:/i.test(input) ? input : `https://${input}`); }
   catch { throw new Error('That join link is not a valid URL.'); }
-  const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
-  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback)) throw new Error('Use an HTTPS join link. HTTP is supported only on localhost.');
+  if (!['http:', 'https:'].includes(url.protocol)) throw new Error('Use an HTTP or HTTPS game join link.');
   if (!url.hostname || url.username || url.password) throw new Error('Use a join link without an embedded username or password.');
   return url.href;
 }
@@ -32,7 +31,8 @@ function isAllowedNavigation(target, initial, extraOrigins = new Set()) {
   try {
     const normalized = normalizeJoinUrl(target);
     const origin = new URL(normalized).origin;
-    return origin === new URL(initial).origin || extraOrigins.has(origin) || (isSqyre(normalized) && isSqyre(initial));
+    return origin === new URL(initial).origin || extraOrigins.has(origin) ||
+      (normalized.startsWith('https://') && initial.startsWith('https://') && isSqyre(normalized) && isSqyre(initial));
   } catch { return false; }
 }
 

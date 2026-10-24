@@ -20,8 +20,19 @@ test('join links preserve invitations, paths, and hashes; bare domains default t
   assert.equal(normalizeJoinUrl('http://127.0.0.1:30000/join'), 'http://127.0.0.1:30000/join');
   assert.equal(normalizeJoinUrl('http://[::1]:30000'), 'http://[::1]:30000/');
 });
-test('untrusted protocols, embedded credentials, remote HTTP, and control characters are rejected', () => {
-  for (const url of ['javascript:alert(1)', 'file:///C:/Windows', 'data:text/html,hello', 'https://user:pass@host.com', 'http://game.sqyre.app', 'https://exa\nmple.com', '', 'https://example.com/a b', 'ftp://host']) assert.throws(() => normalizeJoinUrl(url), { name: 'Error' });
+test('non-web protocols, embedded credentials, and control characters are rejected', () => {
+  for (const url of ['javascript:alert(1)', 'file:///C:/Windows', 'data:text/html,hello', 'https://user:pass@host.com', 'http://user:pass@10.8.0.12', 'https://exa\nmple.com', '', 'https://example.com/a b', 'ftp://host', 'ws://host', 'wss://host']) assert.throws(() => normalizeJoinUrl(url), { name: 'Error' });
+});
+test('local, LAN, VPN, IP, and hosted HTTP/HTTPS links use the same compatibility matrix as Rust', t => {
+  for (const [input, expected] of require('./fixtures/join-links.json')) assert.equal(normalizeJoinUrl(input), expected, input);
+  const initial = 'http://10.8.0.12:30000/foundry/join';
+  assert.ok(isAllowedNavigation('http://10.8.0.12:30000/foundry/game', initial));
+  assert.ok(!isAllowedNavigation('http://10.8.0.13:30000/foundry/game', initial));
+  assert.ok(!isAllowedNavigation('http://10.8.0.12:30001/foundry/game', initial));
+  assert.notEqual(partitionFor(initial), partitionFor('https://10.8.0.12:30000/foundry/join'));
+  const directory = tempDirectory('network-', t);
+  new Store(directory).save({name:'VPN game', url:initial});
+  assert.equal(new Store(directory).data.sessions[0].url, initial);
 });
 test('navigation trusts exact origins and Sqyre subdomains without trusting lookalikes', () => {
   const url = 'https://a.games.sqyre.app/join';

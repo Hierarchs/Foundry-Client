@@ -60,8 +60,10 @@ document.cookie='native-cookie=kept; Max-Age=86400; SameSite=Lax';
 
 async function verify() {
   const server = http.createServer((_req,res) => {res.setHeader('Content-Type','text/html'); res.end(world);});
-  await new Promise(resolve => server.listen(0,'127.0.0.1',resolve));
-  const base = `http://127.0.0.1:${server.address().port}`;
+  // A different loopback address exercises HTTP outside the old localhost-only
+  // allowlist without exposing the fixture on a physical network interface.
+  await new Promise((resolve,reject) => {server.once('error',reject);server.listen(0,'127.0.0.2',resolve);});
+  const base = `http://127.0.0.2:${server.address().port}`;
   const data = path.join(root,'.test-data',`native-${Date.now()}`);
   fs.mkdirSync(data,{recursive:true});
   // Exercise migration from an existing Electron-format saved session.

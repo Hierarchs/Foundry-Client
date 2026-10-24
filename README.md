@@ -4,7 +4,7 @@ A dedicated **Windows 10/11 x64 client for Foundry Virtual Tabletop V14**, inclu
 
 ## Run it
 
-Download/extract the portable archive from `release/rust/`, then run **Foundry Client.exe**. Alternatively, use **Foundry-Client-Rust-Setup-0.2.0-x64.exe**. The installer creates separate Rust-edition shortcuts and leaves an existing Electron installation intact.
+Download/extract the portable archive from `release/rust/`, then run **Foundry Client.exe**. Alternatively, use **Foundry-Client-Rust-Setup-0.2.1-x64.exe**. The installer creates separate Rust-edition shortcuts and leaves an existing Electron installation intact.
 
 1. Start your game on Sqyre and copy its **game join link**.
 2. Paste it into **Join a session**, optionally name it, and click **Join session**.
@@ -15,6 +15,25 @@ Download/extract the portable archive from `release/rust/`, then run **Foundry C
 This application is a client for an existing server. It does not include or host Foundry, start Sqyre servers, or bundle licensed game content. A hosting dashboard URL is not necessarily a game join link. Authentication providers that prohibit embedded browsers may need additional integration; logging in through an external browser does not automatically transfer its cookies into this client.
 
 **Microsoft Edge WebView2 Runtime is required.** It is normally present on modern Windows installations; [download it from Microsoft](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) if needed. Rust, Node.js, and Visual Studio are not required to run the compiled client. These builds are unsigned and do not have automatic app updates; WebView2 receives its own Microsoft updates.
+
+## Connection compatibility
+
+Version 0.2.1 accepts **HTTP and HTTPS** game join URLs without a hosting-provider or IP-address allowlist:
+
+| Server type | Example join URL |
+| --- | --- |
+| Local server | `http://localhost:30000/join` |
+| LAN address or hostname | `http://192.168.1.42:30000/join`, `http://foundry-pc:30000/join` |
+| VPN address or DNS name | `http://10.8.0.12:30000/join`, `http://game.example-tailnet.ts.net:30000/join` |
+| Public IPv4 / IPv6 | `http://203.0.113.42:30000/join`, `http://[2001:db8::42]:30000/join` |
+| HTTPS / reverse proxy | `https://foundry.example.org:34443/table/join?invite=kept#seat` |
+| Hosted Foundry game | Paste the full game join URL supplied by the provider |
+
+Use the full URL, including `http://` or `https://` and any required port. Links without a protocol default to HTTPS. Ports, reverse-proxy paths, invitation queries, and fragments are retained. IPv6 addresses use square brackets when included in a URL.
+
+[Foundry's hosting partners](https://foundryvtt.com/article/partnerships/) include Sqyre, The Forge, Molten Hosting, and Foundry Server. Their standard game join URLs are accepted; sign-in redirects to other origins ask for confirmation. The client uses the PC's normal network and DNS configuration, including an already-connected VPN. The server must be reachable through that network. It does not set up a VPN or port forwarding.
+
+HTTPS certificate validation remains enabled. Camera, microphone, and other secure-context browser features can be unavailable on non-local HTTP servers. The connection test suite covers a real HTTP game fixture outside the previous localhost allowlist and a shared URL matrix covering LAN, VPN, IPv4, IPv6, HTTPS, and provider-style links. Authenticated sessions on each provider and a real VPN still need live compatibility testing.
 
 ## What Rust changes
 
@@ -109,7 +128,7 @@ npm run dist
 
 ## Remote-content isolation
 
-Only the embedded local launcher has an IPC handler, validated against its exact local origin. Game pages and pop-outs get no Node runtime, custom IPC handler, filesystem bridge, or host objects. Native code executes only fixed, bundled Foundry adapter scripts in the game. External links and new sign-in origins require a native confirmation; only HTTPS URLs and loopback HTTP are accepted. OS commands and custom-protocol URLs cannot be launched by game links. Test debugging ports and test data overrides are unavailable in a normal production build.
+Only the embedded local launcher has an IPC handler, validated against its exact local origin. Game pages and pop-outs get no Node runtime, custom IPC handler, filesystem bridge, or host objects. Native code executes only fixed, bundled Foundry adapter scripts in the game. External links and new sign-in origins require a native confirmation. HTTP and HTTPS join URLs are accepted; a change of scheme, host, or port changes the origin. Sqyre's automatic cross-subdomain navigation is limited to HTTPS. OS commands and custom-protocol URLs cannot be launched by game links. Test debugging ports and test data overrides are unavailable in a normal production build.
 
 ## References
 
