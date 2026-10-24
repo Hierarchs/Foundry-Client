@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'">
+  <title>Foundry Client</title>
+  <link rel="icon" href="mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header class="titlebar">
+    <div class="window-brand"><img src="mark.svg" alt=""><span>FOUNDRY CLIENT</span><span class="version-tag">DESKTOP</span></div>
+    <div id="game-tools" class="game-tools" hidden>
+      <span id="active-title"></span>
+      <button id="library-toggle" class="toolbar-button" title="Session library · Ctrl+Shift+L">Sessions</button>
+      <button id="quick-performance" class="toolbar-button" title="View performance">Performance</button>
+      <button id="live-fps" class="toolbar-button" title="Toggle live gameplay FPS" aria-pressed="false">FPS</button>
+      <button id="reload-game" class="toolbar-button" title="Reload game">↻</button>
+      <button id="focus-game" class="toolbar-button" title="Hide client toolbar · Ctrl+Shift+F">Focus</button>
+      <button id="fullscreen" class="toolbar-button" title="Fullscreen · F11">⛶</button>
+    </div>
+    <div class="window-controls"><button id="minimize" aria-label="Minimize">−</button><button id="maximize" aria-label="Maximize or restore">□</button><button id="close" aria-label="Close client">×</button></div>
+  </header>
+
+  <div id="launcher" class="app-layout">
+    <aside class="sidebar">
+      <div class="workspace-label">YOUR WORKSPACE</div>
+      <nav aria-label="Main navigation">
+        <button class="nav-button selected" data-page="sessions" aria-label="Session library"><span class="nav-icon" aria-hidden="true">▦</span>Session library<span id="session-count" class="count">0</span></button>
+        <button class="nav-button" data-page="performance" aria-label="Performance"><span class="nav-icon" aria-hidden="true">◴</span>Performance</button>
+        <button class="nav-button" data-page="preferences" aria-label="Preferences"><span class="nav-icon" aria-hidden="true">⚙</span>Preferences</button>
+      </nav>
+      <div class="sidebar-note"><span class="small-kicker">MADE FOR YOUR TABLE</span><p>One game.<br>Room to breathe.</p><span>A dedicated space for Foundry Virtual Tabletop.</span><div class="note-line"></div><span class="sidebar-platform">FOUNDRY V14 <span> / </span> SQYRE READY</span></div>
+      <div class="sidebar-bottom"><div class="engine-light" id="engine-light"></div><div><strong id="engine-label">Checking graphics</strong><span id="runtime-short">Chromium runtime</span></div></div>
+    </aside>
+
+    <main>
+      <div id="connection-banner" class="connection-banner" hidden><span id="connection-message"></span><div><button id="retry" class="text-button">Retry</button><button id="disconnect" class="text-button">Disconnect</button><button id="resume" class="text-button">Return to game →</button></div></div>
+      <div id="warning" class="notice" hidden></div>
+
+      <section id="page-sessions" class="page">
+        <div class="page-top"><span class="eyebrow">THE ADVENTURE STARTS HERE</span><span class="subtle-label"><span class="tiny-diamond"></span> CLIENT 0.1</span></div>
+        <div class="hero"><div><h1>Your table.<br><span>Nothing in the way.</span></h1><p>Bring your party. Paste your join link.<br>A focused home for every Foundry session.</p></div><div class="hero-art" aria-hidden="true"><div class="art-ring outer"></div><div class="art-ring inner"></div><img src="mark.svg" alt=""><span class="art-cross cross-one">+</span><span class="art-cross cross-two">+</span><span class="art-coordinate">ROLL INTO YOUR NEXT WORLD</span></div></div>
+
+        <div class="session-layout">
+          <div class="library-column"><div class="section-heading"><h2>Your sessions <span id="list-count">00</span></h2><button id="new-session" class="text-button">+ New session</button></div><p class="section-description">Different worlds. One place to return to.</p>
+            <div id="session-list" class="session-list"></div>
+            <div id="empty-state" class="empty-state"><div class="empty-symbol">◇</div><h3>A seat at your next table.</h3><p>Save a join link and your sessions<br>will appear here, ready for game night.</p><button id="empty-add" class="secondary-button">Add your first session <span>↗</span></button></div>
+            <div class="host-note"><span class="host-icon">↗</span><p><strong>Hosting on Sqyre?</strong> Start your game on Sqyre, then copy its game join link here.</p><button id="open-sqyre" class="text-button">Open Sqyre</button></div>
+          </div>
+
+          <form id="join-form" class="join-panel">
+            <div class="panel-kicker"><span class="tiny-diamond"></span> CONNECT TO A WORLD</div><h2 id="form-title">Join a session</h2><p class="panel-description">Your next adventure is a link away.</p>
+            <label for="session-url">Game join link <span>REQUIRED</span></label><input id="session-url" name="url" type="text" placeholder="https://your-game.games.sqyre.app" required maxlength="4096" autocomplete="off" spellcheck="false"><p class="field-hint">Sqyre or any HTTPS Foundry server.</p>
+            <label for="session-name">Session name <span>OPTIONAL</span></label><input id="session-name" name="name" type="text" placeholder="e.g. Friday night campaign" maxlength="80" autocomplete="off">
+            <fieldset class="profile-fieldset"><legend>Rendering profile</legend><div class="profile-options">
+              <label class="profile-option"><input type="radio" name="profile" value="efficiency"><span><strong>Efficiency</strong><small>30 FPS · Low</small></span></label>
+              <label class="profile-option"><input type="radio" name="profile" value="balanced" checked><span><strong>Balanced</strong><small>60 FPS · Medium</small></span></label>
+              <label class="profile-option"><input type="radio" name="profile" value="quality"><span><strong>Quality</strong><small>60 FPS · High</small></span></label>
+            </div></fieldset><p class="field-hint profile-hint">Apply your profile from Performance after joining a world.</p>
+            <label class="checkbox-label"><input id="save-session" type="checkbox" checked>Save to my session library</label>
+            <button type="submit" id="join-button" class="primary-button">Join session <span>→</span></button><div class="form-footer"><span><span class="lock-icon">◇</span> Login stays on your device</span><button id="save-only" type="button" class="text-button">Save only</button></div>
+            <p id="form-error" class="inline-error" role="alert" hidden></p>
+          </form>
+        </div>
+        <footer class="page-footer"><span>A little less browser. A little more adventure.</span><span>Independent client · Not affiliated with Foundry or Sqyre</span></footer>
+      </section>
+
+      <section id="page-performance" class="page" hidden>
+        <div class="page-top"><span class="eyebrow">GIVE YOUR WORLD SOME ROOM</span><span class="subtle-label">LIVE DIAGNOSTICS</span></div><h1 class="page-title">Performance<span class="gold-dot">.</span></h1><p class="page-intro">See what your client is doing. Find the right balance for your table.</p>
+        <div class="metrics-grid"><div class="metric"><span>CANVAS FRAMERATE</span><strong id="metric-fps">—</strong><small>FPS · Foundry canvas ticker</small></div><div class="metric"><span>CLIENT MEMORY</span><strong id="metric-memory">—</strong><small>MB · all client processes</small></div><div class="metric"><span>CLIENT CPU</span><strong id="metric-cpu">—</strong><small>% · normalized across CPU cores</small></div><div class="metric"><span>GRAPHICS</span><strong id="metric-gpu" class="metric-text">Checking</strong><small id="metric-webgl">WebGL status</small></div></div>
+        <div class="performance-layout"><div class="settings-panel"><h2>Rendering profiles</h2><p>These use Foundry’s own client settings. Join a V14 world, choose a profile, then apply it. Reload if Foundry requests it.</p><div id="performance-profiles" class="performance-profiles"></div><div class="action-row"><button id="apply-profile" class="primary-button">Apply to current world →</button><button id="restore-profile" class="text-button">Restore original settings</button></div><p class="field-hint">Changes affect this client on this server. Your original values are saved before the first change.</p><p id="profile-result" class="result-message" role="status"></p></div>
+        <div class="settings-panel diagnostic-panel"><span class="panel-kicker">UNDER THE HOOD</span><h2>A focused runtime</h2><dl id="runtime-details"></dl><p>Hardware acceleration and persistent asset caching are enabled. Only one game runs at a time; switching sessions releases the previous game.</p><p class="field-hint">Scene size, modules, your GPU, and the host still determine actual performance. No FPS improvement is guaranteed.</p></div></div>
+        <div class="notice"><strong>Measure while you play.</strong> This page hides the game, which may pause its rendering. Toggle <strong>FPS</strong> in the game toolbar for live gameplay readings. Try Efficiency, then reduce animated lights and token vision animation in Foundry’s Configure Settings for a lighter session.</div>
+      </section>
+
+      <section id="page-preferences" class="page" hidden>
+        <div class="page-top"><span class="eyebrow">MAKE YOURSELF AT HOME</span><span class="subtle-label">CLIENT SETTINGS</span></div><h1 class="page-title">Your preferences<span class="gold-dot">.</span></h1><p class="page-intro">Small adjustments for the way you play.</p>
+        <div class="settings-panel preferences-panel"><h2>During a session</h2>
+          <label class="setting-row"><span><strong>Prefer the dedicated GPU</strong><small>Use your dedicated graphics card when available. Recommended for Foundry. Changes take effect after restarting the client.</small></span><input type="checkbox" id="pref-preferDedicatedGpu" role="switch"></label>
+          <label class="setting-row"><span><strong>Ease off when minimized</strong><small>Let Chromium throttle background rendering to save resources. Turn off if background game animations need to keep running.</small></span><input type="checkbox" id="pref-backgroundThrottle" role="switch"></label>
+          <label class="setting-row"><span><strong>Keep the screen awake</strong><small>Prevent display sleep while the game window is visible. Normal sleep behavior resumes when minimized or disconnected.</small></span><input type="checkbox" id="pref-keepAwake" role="switch"></label>
+          <label class="setting-row"><span><strong>Allow camera and microphone requests</strong><small>For Foundry’s voice and video features. Each media request still asks for permission.</small></span><input type="checkbox" id="pref-allowMedia" role="switch"></label>
+        </div>
+        <div class="preferences-grid"><div class="settings-panel"><h2>Make room for the map</h2><div class="shortcut"><span>Fullscreen</span><kbd>F11</kbd></div><div class="shortcut"><span>Hide / show toolbar</span><kbd>Ctrl Shift F</kbd></div><div class="shortcut"><span>Session library</span><kbd>Ctrl Shift L</kbd></div><p class="field-hint">You can return to the library while a game runs. Disconnect to release its memory.</p></div><div class="settings-panel"><h2>Asset cache</h2><p>Images and other assets are cached between visits. Clear a server’s cache if an asset looks outdated. Your login and Foundry settings are retained.</p><label for="cache-session" class="sr-only">Session cache to clear</label><select id="cache-session"></select><button id="clear-cache" class="secondary-button">Clear asset cache</button><p id="cache-result" class="result-message" role="status"></p></div></div>
+        <div class="notice">Session links and preferences are stored locally. Links can include private invitation tokens; treat your saved sessions like private bookmarks.</div>
+      </section>
+    </main>
+  </div>
+  <div id="toast" class="toast" role="status" hidden></div>
+  <dialog id="delete-dialog"><h2>Remove this session?</h2><p>The saved join link will be removed from your library.</p><div class="action-row"><button id="cancel-delete" class="secondary-button">Keep session</button><button id="confirm-delete" class="danger-button">Remove session</button></div></dialog>
+</body>
+</html>
