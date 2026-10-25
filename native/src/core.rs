@@ -117,6 +117,7 @@ pub struct Data {
     pub preferences: Preferences,
     pub backups: BTreeMap<String, BTreeMap<String, Value>>,
     pub layouts: BTreeMap<String, crate::layouts::Placement>,
+    pub playtime: BTreeMap<String, crate::playtime::Record>,
 }
 pub fn profiles() -> Value {
     json!({
@@ -226,6 +227,18 @@ impl Store {
                     && placement.valid()
                 {
                     data.layouts.insert(key.clone(), placement);
+                }
+            }
+        }
+        if let Some(records) = saved["playtime"].as_object() {
+            for (key, value) in records.iter().take(1000) {
+                if key.len() == 64
+                    && key.chars().all(|c| c.is_ascii_hexdigit())
+                    && let Ok(record) =
+                        serde_json::from_value::<crate::playtime::Record>(value.clone())
+                    && record.valid()
+                {
+                    data.playtime.insert(key.clone(), record);
                 }
             }
         }

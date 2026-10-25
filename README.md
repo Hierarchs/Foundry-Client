@@ -4,7 +4,7 @@ A dedicated **Windows 10/11 x64 client for Foundry Virtual Tabletop V14**, inclu
 
 ## Run it
 
-Download/extract the portable archive from `release/rust/`, then run **Foundry Client.exe**. Alternatively, use **Foundry-Client-Rust-Setup-0.3.0-x64.exe**. The installer creates separate Rust-edition shortcuts and leaves an existing Electron installation intact.
+Download/extract the portable archive from `release/rust/`, then run **Foundry Client.exe**. Alternatively, use **Foundry-Client-Rust-Setup-0.3.1-x64.exe**. The installer creates separate Rust-edition shortcuts and leaves an existing Electron installation intact.
 
 1. Start your game on Sqyre and copy its **game join link**.
 2. Paste it into **Join a session**, optionally name it, and click **Join session**.
@@ -26,7 +26,7 @@ Downloads open in the default browser. Close the client before running the new i
 
 ### Publishing updates
 
-The repository currently has no public stable release. Until one is published, the checker reports **No public stable release was found**. A source commit or Actions artifact alone is not an update feed.
+The checker reads public stable GitHub releases. If none are available, it reports **No public stable release was found**. A source commit or Actions artifact alone is not an update feed.
 
 For a future release, synchronize the versions in `package.json`, `package-lock.json`, `native/Cargo.toml`, and `native/Cargo.lock`, commit the tested source, and push a matching `vX.Y.Z` Git tag. The workflow verifies/builds Windows, creates a draft release with the executable, installer, portable ZIP, license notices and SHA-256 hashes, then publishes it as the latest release after uploads finish. A mismatched tag is rejected. The publishing job alone has release-write permissions. Do not move an already-published version tag; use a new version for fixes.
 
@@ -72,6 +72,12 @@ The saved [comparison report](benchmarks/host-overhead.json) uses three alternat
 ## Rendering controls
 
 Version 0.3.0 adds **Canvas FPS limit** in Performance: 30, 60, 90, 120, 144, 165, 180, 240, and uncapped. Apply it after joining a V14 world. It changes the live canvas ticker through PixiJS's public `maxFPS` property, rather than writing values beyond Foundry's registered settings range. **Restore FPS limit** restores the original ticker value. The override applies to the loaded canvas; scene changes, reloads, or graphics changes may reset it. It does not change stored Foundry settings or disable browser synchronization. Actual FPS depends on the display, scene, and GPU; 240 FPS is a target, not a guaranteed result. [PixiJS ticker documentation](https://pixijs.com/8.x/guides/components/ticker).
+
+## Time played
+
+Version 0.3.1 adds **Preferences → Time played**, showing a cumulative total, the current connection, and a breakdown by Foundry world. A compact timer also appears in the game toolbar. It starts only after a world reports `game.ready` with a world ID, and pauses when the socket disconnects or the client leaves the game. Loaded games continue counting while minimized or while viewing client preferences. Login/setup screens do not count. Counters are local to this Windows user and keyed by server origin plus world ID.
+
+The Rust host samples the loaded game every five seconds without process diagnostics. Only intervals between two successful, connected samples count; transitions can undercount by a few seconds. Long gaps from computer sleep or suspension are discarded. Totals are saved every minute and on normal disconnect/exit, so an unexpected process termination may lose up to a minute. **Ctrl+Shift+F** restores a hidden client toolbar, **Ctrl+Shift+L** opens the library, and **F11** toggles fullscreen.
 
 ## Multi-monitor layouts
 

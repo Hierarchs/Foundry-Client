@@ -50,7 +50,7 @@ async function launch(data, options = {}) {
 const world = `<!doctype html><title>Native integration world</title><style>body{background:#151d29;color:#ddd;font:20px system-ui;padding:40px}canvas{width:400px;height:200px}</style><h1>Native integration world</h1><button id="popout">Detach sheet</button><canvas id="map"></canvas><script>
 const values=JSON.parse(localStorage.getItem('settings')||'{"performanceMode":2,"maxFPS":60,"pixelRatioResolutionScaling":true}');
 const definitions=new Map([['core.performanceMode',{scope:'client',type:Number,choices:{0:'Low',1:'Medium',2:'High'}}],['core.maxFPS',{scope:'client',type:Number,range:{min:0,max:120}}],['core.pixelRatioResolutionScaling',{scope:'client',type:Boolean}]]);
-window.game={ready:true,version:'14.368',settings:{settings:definitions,get:(_,k)=>values[k],set:async(_,k,v)=>{await new Promise(r=>setTimeout(r,20));values[k]=v;localStorage.setItem('settings',JSON.stringify(values));return v}}};
+window.game={ready:true,version:'14.368',world:{id:'native-world',title:'Native integration world'},socket:{connected:true},settings:{settings:definitions,get:(_,k)=>values[k],set:async(_,k,v)=>{await new Promise(r=>setTimeout(r,20));values[k]=v;localStorage.setItem('settings',JSON.stringify(values));return v}}};
 const gl=document.querySelector('#map').getContext('webgl2');
 window.canvas={app:{ticker:{FPS:58,maxFPS:60},renderer:{gl}}};
 if(gl){gl.clearColor(.12,.18,.22,1);gl.clear(gl.COLOR_BUFFER_BIT)}
@@ -88,6 +88,14 @@ async function verify() {
     let game;
     await expect.poll(() => { game=context.pages().find(p=>p.url().startsWith(base+'/join'));return !!game;}).toBe(true);
     await game.waitForFunction(()=>game?.ready);
+    await expect.poll(()=>page.evaluate(()=>window.client.invoke('state').then(s=>s.playtime.tracking)),{timeout:12000}).toBe(true);
+    await expect.poll(()=>page.evaluate(()=>window.client.invoke('state').then(s=>s.playtime.totalSeconds)),{timeout:12000}).toBeGreaterThanOrEqual(5);
+    await game.evaluate(()=>{game.ready=false;});
+    await expect.poll(()=>page.evaluate(()=>window.client.invoke('state').then(s=>s.playtime.tracking)),{timeout:12000}).toBe(false);
+    const counted=await page.evaluate(()=>window.client.invoke('state').then(s=>s.playtime.totalSeconds));
+    await game.evaluate(()=>{game.ready=true;game.socket.connected=false;});
+    await expect.poll(()=>page.evaluate(()=>window.client.invoke('state').then(s=>s.playtime.totalSeconds))).toBe(counted);
+    await game.evaluate(()=>{game.socket.connected=true;});
     await expect(page.locator('#library-toggle')).toHaveText('Sessions');
     await expect(page.locator('#launcher')).toBeHidden();
     const isolation=await game.evaluate(()=>({bridge:typeof window.client,node:typeof require,ipc:typeof window.ipc,webgl:!!canvas.app.renderer.gl}));
@@ -112,6 +120,8 @@ async function verify() {
     expect(await game.evaluate(()=>JSON.parse(localStorage.getItem('settings')))).toEqual({performanceMode:0,maxFPS:30,pixelRatioResolutionScaling:false});
     // Applying asynchronous settings and their backups must survive a restart.
     await application.close(); application = await launch(data); ({page,context}=application);
+    expect((await page.evaluate(()=>window.client.invoke('state'))).playtime.totalSeconds).toBeGreaterThanOrEqual(counted);
+    expect((await page.evaluate(()=>window.client.invoke('state'))).playtime.tracking).toBe(false);
     await page.getByRole('button',{name:'Join Imported campaign',exact:true}).click();
     await expect.poll(()=>{game=context.pages().find(p=>p.url().startsWith(base+'/join'));return !!game;}).toBe(true);
     await game.waitForFunction(()=>game?.ready);
@@ -174,10 +184,12 @@ async function verify() {
     expect((await page.evaluate(()=>window.client.invoke('test-layout')))[0].height).toBe(savedPlacement.height);
     console.log(JSON.stringify({nativeIntegration:'passed',runtime:state.runtime,diagnostic},null,2));
   } catch(error) {
+    console.error('Native integration failure:',error);
     if(application) {
       console.error('Native process output:',application.output);
+      console.error('Native exit:',application.child.exitCode,application.child.signalCode);
       console.error('Native pages:',application.browser.contexts().map(c=>c.pages().map(p=>p.url())));
-      console.error('Native targets:',await (await application.browser.newBrowserCDPSession()).send('Target.getTargets').catch(()=>null));
+      console.error('Native targets:',await application.browser.newBrowserCDPSession().then(s=>s.send('Target.getTargets')).catch(()=>null));
       console.error('Native state:',await application.page.evaluate(()=>window.client.invoke('state')).catch(()=>null));
     }
     throw error;

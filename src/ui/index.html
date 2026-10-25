@@ -17,6 +17,7 @@
       <button id="library-toggle" class="toolbar-button" title="Session library · Ctrl+Shift+L">Sessions</button>
       <button id="quick-performance" class="toolbar-button" title="View performance">Performance</button>
       <button id="live-fps" class="toolbar-button" title="Toggle live gameplay FPS" aria-pressed="false">FPS</button>
+      <span id="live-playtime" class="toolbar-button" title="Time played in this connection" hidden>0m</span>
       <button id="reload-game" class="toolbar-button" title="Reload game">↻</button>
       <button id="focus-game" class="toolbar-button" title="Hide client toolbar · Ctrl+Shift+F">Focus</button>
       <button id="fullscreen" class="toolbar-button" title="Fullscreen · F11">⛶</button>
@@ -84,6 +85,7 @@
 
       <section id="page-preferences" class="page" hidden>
         <div class="page-top"><span class="eyebrow">MAKE YOURSELF AT HOME</span><span class="subtle-label">CLIENT SETTINGS</span></div><h1 class="page-title">Your preferences<span class="gold-dot">.</span></h1><p class="page-intro">Small adjustments for the way you play.</p>
+        <div id="playtime-panel" class="settings-panel preferences-panel" hidden><h2>Time played</h2><p id="playtime-status" class="section-description">Waiting for a loaded world.</p><p><strong id="playtime-total">0m</strong> total · <span id="playtime-session">0m</span> this connection</p><dl id="playtime-worlds" class="runtime-details"></dl><p class="field-hint">Counts loaded, connected Foundry worlds, including while minimized. Login screens and disconnected time are excluded. Sampled every 5 seconds; saved every minute and on disconnect or close.</p></div>
         <div id="update-panel" class="settings-panel preferences-panel" hidden>
           <h2>Client updates</h2>
           <p id="update-version" class="section-description"></p>

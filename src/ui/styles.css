@@ -937,6 +937,8 @@ input[type=checkbox] {
   max-width:900px;
   margin-bottom:23px
 }
+#playtime-worlds {display:grid;grid-template-columns:1fr auto;gap:12px;font-size:12px}
+#playtime-worlds dd {margin:0;color:#d7b575}
 .setting-row {
   display:flex;
   align-items:center;

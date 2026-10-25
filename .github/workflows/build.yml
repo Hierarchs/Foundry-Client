@@ -24,6 +24,7 @@ jobs:
             ~/.cargo/git
             native/target
           key: rust-${{ runner.os }}-${{ hashFiles('native/Cargo.lock', '.cargo/config.toml') }}
+          restore-keys: rust-${{ runner.os }}-
       - run: npm ci
       - run: npm run check
       - run: npm test

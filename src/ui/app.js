@@ -50,8 +50,24 @@ function render(next) {
   }
   $('apply-profile').disabled = !state.active;
   $('restore-profile').disabled = !state.active;
-  renderSessions(); renderCache(); renderRuntime(); renderUpdates(); scheduleDiagnostics();
+  renderSessions(); renderCache(); renderRuntime(); renderUpdates(); renderPlaytime(state.playtime); scheduleDiagnostics();
 }
+function playedDuration(seconds) {
+  const whole=Math.floor(seconds || 0),minutes=Math.floor(whole/60),hours=Math.floor(minutes/60);
+  return hours ? `${hours}h ${minutes%60}m` : `${minutes}m ${whole%60}s`;
+}
+function renderPlaytime(time) {
+  $('playtime-panel').hidden = $('live-playtime').hidden = !time;
+  if(!time)return;
+  $('live-playtime').textContent = playedDuration(time.sessionSeconds);
+  $('live-playtime').title = `${time.tracking ? 'Tracking' : 'Paused'} · ${time.sessionSeconds}s in this connection`;
+  $('playtime-total').textContent = playedDuration(time.totalSeconds);
+  $('playtime-session').textContent = playedDuration(time.sessionSeconds);
+  $('playtime-status').textContent = time.world ? `${time.tracking ? 'Tracking' : 'Paused'} · ${time.world}` : 'Waiting for a loaded world.';
+  $('playtime-worlds').replaceChildren();
+  for(const world of time.worlds) $('playtime-worlds').append(element('dt','',world.name),element('dd','',playedDuration(world.seconds)));
+}
+window.__clientPlaytime=renderPlaytime;
 function renderUpdates() {
   const update = state.updates;
   $('update-panel').hidden = !update;

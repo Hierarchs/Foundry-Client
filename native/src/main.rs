@@ -5,6 +5,7 @@ mod desktop;
 mod layouts;
 #[cfg(windows)]
 mod metrics;
+mod playtime;
 mod updates;
 #[cfg(windows)]
 mod web;

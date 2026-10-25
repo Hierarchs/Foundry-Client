@@ -2,7 +2,7 @@ use crate::{
     core::{self, Session, Store},
     layouts,
     metrics::Metrics,
-    updates,
+    playtime, updates,
     web::{self, Trust},
 };
 use serde::Deserialize;
@@ -122,6 +122,10 @@ struct Client {
     update_deadline: Option<Instant>,
     pending: HashMap<u64, Pending>,
     layout_deadline: Option<Instant>,
+    playtime: playtime::Tracker,
+    playtime_tick: Instant,
+    playtime_save: Instant,
+    playtime_dirty: bool,
     proxy: EventLoopProxy<NativeEvent>,
     testing: bool,
     exiting: bool,
@@ -206,6 +210,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         update_deadline: None,
         pending: HashMap::new(),
         layout_deadline: None,
+        playtime: playtime::Tracker::default(),
+        playtime_tick: Instant::now(),
+        playtime_save: Instant::now() + Duration::from_secs(60),
+        playtime_dirty: false,
         proxy,
         testing,
         exiting: false,
@@ -221,6 +229,15 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     event_loop.run(move |event, target, flow| {
         let mut deadline = client.pending.values().map(|p| p.deadline).min();
+        if client.game.is_some()
+            && client.phase != "error"
+            && !client.pending.contains_key(&playtime::REQUEST)
+        {
+            deadline = Some(deadline.map_or(client.playtime_tick, |d| d.min(client.playtime_tick)));
+        }
+        if client.playtime_dirty {
+            deadline = Some(deadline.map_or(client.playtime_save, |d| d.min(client.playtime_save)));
+        }
         if let Some(layout) = client.layout_deadline {
             deadline = Some(deadline.map_or(layout, |d| d.min(layout)));
         }
@@ -271,6 +288,22 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             Event::MainEventsCleared => {
+                if client.playtime_dirty && Instant::now() >= client.playtime_save {
+                    client.save_playtime();
+                }
+                if client.game.is_some()
+                    && client.phase != "error"
+                    && Instant::now() >= client.playtime_tick
+                    && !client.pending.contains_key(&playtime::REQUEST)
+                {
+                    client.playtime_tick = Instant::now() + Duration::from_secs(5);
+                    if client
+                        .begin_script(playtime::REQUEST, playtime::SAMPLE.into(), Work::Frame)
+                        .is_err()
+                    {
+                        client.observe_playtime(None);
+                    }
+                }
                 if client.layout_deadline.is_some_and(|d| Instant::now() >= d) {
                     client.flush_layouts();
                 }
@@ -303,6 +336,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     .collect();
                 for id in expired {
                     client.pending.remove(&id);
+                    if id == playtime::REQUEST {
+                        client.observe_playtime(None);
+                        continue;
+                    }
                     client.reply(
                         id,
                         Err("The game took too long to respond. Try reloading it.".into()),
@@ -325,6 +362,37 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 impl Client {
+    fn observe_playtime(&mut self, value: Option<Value>) {
+        let sample = value.as_ref().and_then(|value| {
+            let id = value["id"]
+                .as_str()
+                .filter(|s| !s.is_empty() && s.len() <= 128)?;
+            let origin = core::origin(&self.active.as_ref()?.url).ok()?;
+            let name = value["name"]
+                .as_str()
+                .unwrap_or(id)
+                .chars()
+                .take(100)
+                .collect();
+            Some((playtime::identity(&origin, id), name))
+        });
+        self.playtime_dirty |=
+            self.playtime
+                .observe(Instant::now(), sample, &mut self.store.data.playtime);
+        let _ = self.ui.evaluate_script(&format!(
+            "window.__clientPlaytime?.({});",
+            self.playtime.snapshot(&self.store.data.playtime)
+        ));
+    }
+    fn save_playtime(&mut self) {
+        self.playtime_save = Instant::now() + Duration::from_secs(60);
+        if self.playtime_dirty {
+            match self.store.write() {
+                Ok(()) => self.playtime_dirty = false,
+                Err(error) => self.store.warning = Some(error),
+            }
+        }
+    }
     fn remember_main(&mut self) {
         if let Some(placement) = SelfWindow::capture(&self.window) {
             self.store.data.layouts.insert("main".into(), placement);
@@ -381,7 +449,7 @@ impl Client {
             a["id"] = Value::Null;
         }
         json!({"sessions":self.store.data.sessions,"preferences":self.store.data.preferences,"profiles":core::profiles(),"active":active,
-            "status":{"phase":self.phase,"message":self.message},"overlay":self.overlay,"focusMode":self.focus,"warning":self.store.warning,"updates":self.updates,
+            "status":{"phase":self.phase,"message":self.message},"overlay":self.overlay,"focusMode":self.focus,"warning":self.store.warning,"updates":self.updates,"playtime":self.playtime.snapshot(&self.store.data.playtime),
             "runtime":{"app":env!("CARGO_PKG_VERSION"),"backend":"rust","rust":env!("FOUNDRY_RUST_VERSION"),"engine":"WebView2","chromium":wry::webview_version().unwrap_or_else(|_| "Unknown".into()),"ramGB":self.metrics.ram_gb()}})
     }
     fn publish(&self) {
@@ -467,6 +535,9 @@ impl Client {
         }
     }
     fn release(&mut self) {
+        self.playtime.reset();
+        self.save_playtime();
+        self.playtime_tick = Instant::now();
         for id in self.popouts.keys().copied().collect::<Vec<_>>() {
             self.remember_popup(id);
         }
@@ -481,6 +552,9 @@ impl Client {
         let stale: Vec<_> = self.pending.keys().copied().collect();
         self.pending.clear();
         for id in stale {
+            if id == playtime::REQUEST {
+                continue;
+            }
             self.reply(
                 id,
                 Err("The session changed before this operation finished.".into()),
@@ -613,6 +687,10 @@ impl Client {
         };
         if pending.generation != self.generation {
             self.reply(id, Err("The session changed.".into()));
+            return;
+        }
+        if id == playtime::REQUEST {
+            self.observe_playtime(result.ok());
             return;
         }
         let result = result.and_then(|value| match pending.work {
@@ -945,15 +1023,18 @@ impl Client {
                 }
             }
             NativeEvent::Loading(generation) if generation == self.generation => {
+                self.observe_playtime(None);
                 self.status("loading", "Connecting to your table…")
             }
             NativeEvent::Loaded { generation, error } if generation == self.generation => {
                 if let Some(error) = error {
+                    self.observe_playtime(None);
                     self.overlay = true;
                     self.focus = false;
                     self.layout();
                     self.status("error", error);
                 } else {
+                    self.playtime_tick = Instant::now();
                     self.status("connected", "Game page loaded");
                 }
             }
@@ -971,6 +1052,9 @@ impl Client {
             NativeEvent::Shortcut(action) => {
                 if action == "library" {
                     self.set_overlay(true);
+                    let _ = self.ui.evaluate_script(
+                        "document.querySelector('[data-page=\"sessions\"]')?.click();",
+                    );
                     let _ = self.ui.focus();
                 } else {
                     let _ = self.command(&Rpc {
