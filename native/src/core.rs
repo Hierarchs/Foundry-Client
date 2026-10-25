@@ -103,6 +103,9 @@ pub struct Preferences {
     pub allow_media: bool,
     pub prefer_dedicated_gpu: bool,
     pub auto_check_updates: bool,
+    pub adaptive_fps: bool,
+    pub idle_fps: u32,
+    pub economize_popouts: bool,
 }
 impl Default for Preferences {
     fn default() -> Self {
@@ -112,6 +115,9 @@ impl Default for Preferences {
             allow_media: false,
             prefer_dedicated_gpu: yes(),
             auto_check_updates: yes(),
+            adaptive_fps: false,
+            idle_fps: 30,
+            economize_popouts: true,
         }
     }
 }
@@ -372,6 +378,18 @@ impl Store {
     }
 }
 fn patch_preferences(preferences: &mut Preferences, input: &Value) {
+    if let Some(value) = input["adaptiveFps"].as_bool() {
+        preferences.adaptive_fps = value;
+    }
+    if let Some(value) = input["economizePopouts"].as_bool() {
+        preferences.economize_popouts = value;
+    }
+    if let Some(value) = input["idleFps"]
+        .as_u64()
+        .filter(|v| [15, 30, 60].contains(v))
+    {
+        preferences.idle_fps = value as u32;
+    }
     if let Some(v) = input["backgroundThrottle"].as_bool() {
         preferences.background_throttle = v;
     }
@@ -567,6 +585,9 @@ mod tests {
     fn edits_preferences_and_backups_survive_restart() {
         let directory = temporary();
         let mut store = Store::load(directory.clone()).unwrap();
+        assert!(!store.data.preferences.adaptive_fps);
+        assert!(store.data.preferences.economize_popouts);
+        assert_eq!(store.data.preferences.idle_fps, 30);
         let id = store
             .save(&json!({"name":"Friday", "url":"a.games.sqyre.app", "profile":"efficiency"}))
             .unwrap();
@@ -574,7 +595,12 @@ mod tests {
             .save(&json!({"id":id, "name":"Friday edited", "url":"b.games.sqyre.app"}))
             .unwrap();
         store
-            .update_preferences(&json!({"allowMedia":true,"keepAwake":"false"}))
+            .update_preferences(&json!({"allowMedia":true,"keepAwake":"false","adaptiveFps":true,"idleFps":15,"economizePopouts":false}))
+            .unwrap();
+        store
+            .update_preferences(
+                &json!({"adaptiveFps":"false","idleFps":240,"economizePopouts":null}),
+            )
             .unwrap();
         let key = backup_key("https://b.games.sqyre.app").unwrap();
         store.data.backups.insert(
@@ -586,6 +612,9 @@ mod tests {
         assert_eq!(restarted.data.sessions.len(), 1);
         assert_eq!(restarted.data.sessions[0].name, "Friday edited");
         assert!(restarted.data.preferences.allow_media && restarted.data.preferences.keep_awake);
+        assert!(restarted.data.preferences.adaptive_fps);
+        assert!(!restarted.data.preferences.economize_popouts);
+        assert_eq!(restarted.data.preferences.idle_fps, 15);
         assert_eq!(restarted.data.backups[&key].len(), 1);
         cleanup(directory);
     }

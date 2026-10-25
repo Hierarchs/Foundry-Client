@@ -5,6 +5,7 @@ let state = null, page = 'sessions', editingId = null, deleteId = null, performa
 let diagnosticTimer = null, diagnosticBusy = false, toastTimer = null, previousActive = null;
 let liveFPS = false;
 let worldFormSignature = '';
+let lastPlaytime = null, lastTelemetry = null, worldRowsSignature = '', sessionsSignature = '', runtimeSignature = '', cacheSignature = '', telemetrySignature = '';
 const invoke = (action, payload) => window.client.invoke(action, payload);
 const element = (tag, className, text) => { const el = document.createElement(tag); if (className) el.className = className; if (text !== undefined) el.textContent = text; return el; };
 const errorText = error => String(error.message || error).replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '');
@@ -20,6 +21,18 @@ async function safely(action, button) {
   finally { if (button) button.disabled = false; }
 }
 function result(id, message, error = false) { $(id).textContent = message; $(id).classList.toggle('error', error); }
+function setText(id, text) { if ($(id).textContent !== String(text)) $(id).textContent = text; }
+function configureTelemetry() {
+  if (state?.runtime.backend !== 'rust') return;
+  const options = {
+    fps: liveFPS && state.hud?.showFps !== false && !state.focusMode && !state.overlay && !document.hidden,
+    details: page === 'preferences' && (!state.active || state.overlay) && !document.hidden
+  };
+  const signature = JSON.stringify(options);
+  if (signature === telemetrySignature) return;
+  telemetrySignature = signature;
+  invoke('telemetry', options).catch(() => { telemetrySignature = ''; });
+}
 
 function render(next) {
   state = next;
@@ -43,7 +56,10 @@ function render(next) {
     $('runtime-short').textContent = `Rust · WebView2 ${state.runtime.chromium.split('.')[0]}`;
     $('background-throttle-description').textContent = 'Reduce browser memory while minimized. Changes to background timer throttling take effect after restarting the client.';
   }
-  for (const [key, value] of Object.entries(state.preferences)) $(`pref-${key}`).checked = value;
+  for (const [key, value] of Object.entries(state.preferences)) {
+    const field = $(`pref-${key}`);
+    if (field.type === 'checkbox') field.checked = value; else field.value = String(value);
+  }
   if (previousActive !== state.active?.url) {
     previousActive = state.active?.url;
     performanceProfile = state.active?.profile || 'balanced';
@@ -51,11 +67,11 @@ function render(next) {
   }
   $('apply-profile').disabled = !state.active;
   $('restore-profile').disabled = !state.active;
-  renderSessions(); renderCache(); renderRuntime(); renderUpdates(); renderFeatures(); renderPlaytime(state.playtime); scheduleDiagnostics();
+  renderSessions(); renderCache(); renderRuntime(); renderUpdates(); renderFeatures(); renderPlaytime(state.playtime); renderAdaptive(); configureTelemetry(); scheduleDiagnostics();
 }
 function renderFeatures() {
   const rust=state.runtime.backend==='rust',hud=state.hud||{showFps:true,showTime:true,showTitle:true,compact:false,focusKey:'F',libraryKey:'L'};
-  for(const id of ['hud-panel','world-settings-panel','session-organizer','session-group-field'])$(id).hidden=!rust;
+  for(const id of ['hud-panel','world-settings-panel','session-organizer','session-group-field','performance-options-panel'])$(id).hidden=!rust;
   document.body.classList.toggle('hud-compact',hud.compact);
   $('live-fps').hidden=!hud.showFps;$('active-title').hidden=!hud.showTitle;
   if(!hud.showFps){liveFPS=false;$('live-fps').textContent='FPS';$('live-fps').setAttribute('aria-pressed','false');}
@@ -81,17 +97,40 @@ function playedDuration(seconds) {
   return hours ? `${hours}h ${minutes%60}m` : `${minutes}m ${whole%60}s`;
 }
 function renderPlaytime(time) {
+  if (time) lastPlaytime = {...lastPlaytime, ...time};
+  time = lastPlaytime;
   $('playtime-panel').hidden = !time;$('live-playtime').hidden = !time||state?.hud?.showTime===false;
   if(!time)return;
-  $('live-playtime').textContent = playedDuration(time.sessionSeconds);
-  $('live-playtime').title = `${time.tracking ? 'Tracking' : 'Paused'} · ${time.sessionSeconds}s in this connection`;
-  $('playtime-total').textContent = playedDuration(time.totalSeconds);
-  $('playtime-session').textContent = playedDuration(time.sessionSeconds);
-  $('playtime-status').textContent = time.world ? `${time.tracking ? 'Tracking' : 'Paused'} · ${time.world}` : 'Waiting for a loaded world.';
+  if (!document.hidden && !state?.focusMode && state?.hud?.showTime !== false) {
+    setText('live-playtime', playedDuration(time.sessionSeconds));
+    $('live-playtime').title = `${time.tracking ? 'Tracking' : 'Paused'} · ${time.sessionSeconds}s in this connection`;
+  }
+  if (page !== 'preferences' || (state?.active && !state.overlay) || document.hidden) return;
+  setText('playtime-total', playedDuration(time.totalSeconds));
+  setText('playtime-session', playedDuration(time.sessionSeconds));
+  setText('playtime-status', time.world ? `${time.tracking ? 'Tracking' : 'Paused'} · ${time.world}` : 'Waiting for a loaded world.');
+  const signature = JSON.stringify(time.worlds || []);
+  if (signature === worldRowsSignature) return;
+  worldRowsSignature = signature;
   $('playtime-worlds').replaceChildren();
-  for(const world of time.worlds) $('playtime-worlds').append(element('dt','',world.name),element('dd','',playedDuration(world.seconds)));
+  for(const world of time.worlds || []) $('playtime-worlds').append(element('dt','',world.name),element('dd','',playedDuration(world.seconds)));
 }
 window.__clientPlaytime=renderPlaytime;
+function renderAdaptive() {
+  if (page !== 'preferences' || document.hidden) return;
+  const adaptive = lastTelemetry?.adaptive || state?.adaptive;
+  const target = adaptive?.targetFPS === 0 ? 'uncapped' : `${adaptive?.targetFPS} FPS`;
+  setText('adaptive-status', !state?.preferences.adaptiveFps ? 'Adaptive FPS is off.' : adaptive?.error ? adaptive.error : !adaptive?.enabled ? 'Waiting for a loaded world.' : adaptive.idle ? `Idle ceiling active · ${adaptive.effectiveFPS} FPS · restores ${target}` : `Active · ${target}`);
+}
+window.__clientTelemetry = telemetry => {
+  lastTelemetry = telemetry;
+  if (!state) return;
+  renderPlaytime(telemetry.playtime); renderAdaptive();
+  if (liveFPS && !state.overlay && !state.focusMode && !document.hidden) {
+    setText('live-fps', `${telemetry.fps ?? '—'} FPS`);
+    $('live-fps').title = telemetry.adaptive?.idle ? 'Adaptive idle FPS ceiling active. Click to stop monitoring.' : 'Live canvas FPS. Click to stop monitoring.';
+  }
+};
 function renderUpdates() {
   const update = state.updates;
   $('update-panel').hidden = !update;
@@ -110,6 +149,9 @@ function renderUpdates() {
   $('update-banner-text').textContent = available ? update.message : '';
 }
 function renderSessions() {
+  const signature = JSON.stringify([state.sessions, $('session-search').value, $('session-group-filter').value, $('favorites-only').checked]);
+  if (signature === sessionsSignature) return;
+  sessionsSignature = signature;
   const group=$('session-group-filter').value,groups=[...new Set(state.sessions.map(s=>s.group).filter(Boolean))].sort();
   $('session-group-filter').replaceChildren();const all=element('option','','All groups');all.value='';$('session-group-filter').append(all);
   for(const name of groups){const option=element('option','',name);option.value=name;$('session-group-filter').append(option);}
@@ -153,6 +195,9 @@ function renderProfiles() {
   }
 }
 function renderCache() {
+  const signature = JSON.stringify(state.sessions);
+  if (signature === cacheSignature) return;
+  cacheSignature = signature;
   const current = $('cache-session').value;
   $('cache-session').replaceChildren();
   if (!state.sessions.length) { const option = element('option', '', 'No saved sessions'); option.value = ''; $('cache-session').append(option); }
@@ -161,6 +206,9 @@ function renderCache() {
   $('clear-cache').disabled = !state.sessions.length;
 }
 function renderRuntime() {
+  const signature = JSON.stringify([state.runtime, state.preferences.backgroundThrottle]);
+  if (signature === runtimeSignature) return;
+  runtimeSignature = signature;
   const details = { 'Client version': state.runtime.app, ...(state.runtime.backend === 'rust' ? {'Native host': state.runtime.rust, 'Renderer': `WebView2 ${state.runtime.chromium}`} : {'Electron': state.runtime.electron, 'Chromium': state.runtime.chromium}), 'System RAM': `${state.runtime.ramGB} GB`, 'Foundry version': 'Join a world to detect', 'Asset cache': 'Persistent', 'Background rendering': state.preferences.backgroundThrottle ? 'Throttled' : 'Unrestricted' };
   $('runtime-details').replaceChildren();
   for (const [name, value] of Object.entries(details)) { const dt = element('dt', '', name), dd = element('dd', '', value); if (name === 'Foundry version') dd.id = 'foundry-version'; $('runtime-details').append(dt, dd); }
@@ -169,12 +217,7 @@ async function refreshDiagnostics() {
   if (diagnosticBusy || document.hidden) return;
   diagnosticBusy = true;
   try {
-    if (state.runtime.backend === 'rust' && liveFPS && state.active && !state.overlay) {
-      const fps = await invoke('frame');
-      $('live-fps').textContent = `${fps ?? '—'} FPS`;
-      $('live-fps').title = 'Live canvas FPS. Open Performance for memory and CPU diagnostics. Click to stop monitoring.';
-      return;
-    }
+    if (state.runtime.backend === 'rust' && state.active && !state.overlay) { configureTelemetry(); return; }
     const d = await invoke('diagnostics');
     const accelerated = String(d.gpu.webgl2 || d.gpu.webgl || '').startsWith('enabled');
     $('engine-label').textContent = accelerated ? 'GPU acceleration active' : 'Check GPU acceleration';
@@ -191,7 +234,9 @@ async function refreshDiagnostics() {
 }
 function scheduleDiagnostics() {
   clearTimeout(diagnosticTimer);
+  diagnosticTimer = null;
   const inGame = !!state?.active && !state.overlay;
+  if (inGame && state.runtime.backend === 'rust') return;
   if (document.hidden || state?.focusMode || (inGame ? !liveFPS : page !== 'performance')) return;
   diagnosticTimer = setTimeout(async () => { await refreshDiagnostics(); scheduleDiagnostics(); }, 2500);
 }
@@ -201,6 +246,7 @@ async function showPage(target) {
   document.querySelectorAll('.nav-button').forEach(el => el.classList.toggle('selected', el.dataset.page === page));
   if (state?.active && !state.overlay) render(await invoke('overlay', true));
   if (page === 'performance') { renderProfiles(); await refreshDiagnostics(); }
+  renderPlaytime(lastPlaytime || state?.playtime); renderAdaptive(); configureTelemetry();
   scheduleDiagnostics();
 }
 function newSession() {
@@ -254,7 +300,7 @@ $('cancel-delete').onclick = () => $('delete-dialog').close();
 $('confirm-delete').onclick = () => safely(async () => { render(await invoke('remove', deleteId)); if (editingId === deleteId) newSession(); $('delete-dialog').close(); toast('Saved session removed.'); });
 $('library-toggle').onclick = () => safely(async () => { if (state.overlay) render(await invoke('overlay', false)); else await showPage('sessions'); });
 $('quick-performance').onclick = () => safely(() => showPage('performance'));
-$('live-fps').onclick = () => { liveFPS = !liveFPS; $('live-fps').setAttribute('aria-pressed', liveFPS); $('live-fps').textContent = liveFPS ? '— FPS' : 'FPS'; $('live-fps').title = 'Toggle live gameplay FPS'; if (liveFPS) refreshDiagnostics(); scheduleDiagnostics(); };
+$('live-fps').onclick = () => { liveFPS = !liveFPS; $('live-fps').setAttribute('aria-pressed', liveFPS); $('live-fps').textContent = liveFPS ? '— FPS' : 'FPS'; $('live-fps').title = 'Toggle live gameplay FPS'; configureTelemetry(); if (liveFPS) refreshDiagnostics(); scheduleDiagnostics(); };
 $('resume').onclick = () => safely(async () => render(await invoke('overlay', false)));
 $('disconnect').onclick = () => safely(async () => render(await invoke('disconnect')));
 $('retry').onclick = $('reload-game').onclick = () => safely(async () => render(await invoke('reload')));
@@ -265,7 +311,8 @@ for (const action of ['minimize', 'maximize', 'close']) $(action).onclick = () =
 document.querySelector('.titlebar').addEventListener('pointerdown', event => {
   if (state?.runtime.backend === 'rust' && event.button === 0 && !event.target.closest('button')) safely(() => invoke('drag'));
 });
-for (const key of ['backgroundThrottle', 'keepAwake', 'allowMedia', 'preferDedicatedGpu', 'autoCheckUpdates']) $(`pref-${key}`).onchange = () => safely(async () => { render(await invoke('preferences', { [key]: $(`pref-${key}`).checked })); toast(key === 'preferDedicatedGpu' || (key === 'backgroundThrottle' && state.runtime.backend === 'rust') ? 'Preference saved. Restart the client to finish applying.' : 'Preference saved.'); });
+for (const key of ['backgroundThrottle', 'keepAwake', 'allowMedia', 'preferDedicatedGpu', 'autoCheckUpdates', 'adaptiveFps', 'economizePopouts']) $(`pref-${key}`).onchange = () => safely(async () => { render(await invoke('preferences', { [key]: $(`pref-${key}`).checked })); toast(key === 'preferDedicatedGpu' || (key === 'backgroundThrottle' && state.runtime.backend === 'rust') ? 'Preference saved. Restart the client to finish applying.' : 'Preference saved.'); });
+$('pref-idleFps').onchange = () => safely(async () => render(await invoke('preferences', { idleFps: Number($('pref-idleFps').value) })));
 $('check-updates').onclick = () => safely(async () => render(await invoke('check-updates')));
 $('review-update').onclick = () => safely(() => showPage('preferences'));
 $('download-update').onclick = () => safely(() => invoke('open-update', 'download'));
@@ -292,7 +339,7 @@ $('restore-frame-limit').onclick = () => safely(async () => {
   catch(error) { result('frame-limit-result', errorText(error), true); }
 }, $('restore-frame-limit'));
 $('gather-windows').onclick = () => safely(async () => { await invoke('gather-windows'); result('layout-result', 'Open pop-outs moved to this monitor.'); }, $('gather-windows'));
-document.addEventListener('visibilitychange', scheduleDiagnostics);
+document.addEventListener('visibilitychange', () => { configureTelemetry(); scheduleDiagnostics(); if (!document.hidden) { renderPlaytime(lastPlaytime); renderAdaptive(); } });
 document.addEventListener('keydown', event => {
   const modifier = event.ctrlKey || event.metaKey;
   if (event.key === 'F11') { event.preventDefault(); safely(() => invoke('fullscreen')); }

@@ -143,6 +143,11 @@ async function verify() {
     const targets = await application.browser.newBrowserCDPSession();
     const popupTarget = (await targets.send('Target.getTargets')).targetInfos.find(t=>t.url==='about:blank');
     expect(popupTarget).toBeTruthy();
+    expect((await page.evaluate(()=>window.client.invoke('test-performance',{popupFocus:false}))).popouts).toEqual([true]);
+    expect((await page.evaluate(()=>window.client.invoke('test-performance',{popupFocus:true}))).popouts).toEqual([false]);
+    await page.evaluate(()=>window.client.invoke('preferences',{economizePopouts:false}));
+    expect((await page.evaluate(()=>window.client.invoke('test-performance',{popupFocus:false}))).popouts).toEqual([false]);
+    await page.evaluate(()=>window.client.invoke('preferences',{economizePopouts:true}));
     await page.evaluate(()=>window.client.invoke('test-layout',{}));
     await expect.poll(()=>page.evaluate(()=>window.client.invoke('test-layout').then(p=>p[0]?.width))).toBe(760);
     const savedPlacement=(await page.evaluate(()=>window.client.invoke('test-layout')))[0];

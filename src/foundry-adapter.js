@@ -5,7 +5,7 @@ async function configureWorldSettings(options) {
   if(!g?.ready || !g.world?.id) throw new Error('Join a loaded world first.');
   const key=Symbol.for('foundry-client.world-settings'), previous=globalThis[key];
   const hooks=globalThis.Hooks || globalThis.foundry?.helpers?.Hooks;
-  const before=readFoundry().settings, ticker=globalThis.canvas?.app?.ticker, oldFPS=ticker?.maxFPS;
+  const before=readFoundry().settings, ticker=globalThis.canvas?.app?.ticker, oldFPS=clientFrameTarget(ticker);
   if(previous?.handler && hooks?.off) hooks.off('canvasReady',previous.handler);
   try {
     const desired=Object.fromEntries(Object.entries(options.settings || {}).filter(([name,value])=>before[name]!==value));
@@ -13,7 +13,7 @@ async function configureWorldSettings(options) {
     if(Object.keys(desired).length) result=await changeFoundrySettings(desired,!!options.forget);
     if(options.forget) {
       if(ticker && typeof oldFPS==='number') changeFrameLimit(null);
-      if(ticker && Number.isFinite(options.restoreFPS)) ticker.maxFPS=options.restoreFPS;
+      if(ticker && Number.isFinite(options.restoreFPS)) setClientFrameTarget(ticker,options.restoreFPS);
       delete globalThis[key];return result;
     }
     if(!hooks?.on || !hooks?.off) throw new Error('This world does not expose supported scene-ready hooks.');
@@ -34,7 +34,7 @@ async function configureWorldSettings(options) {
     globalThis[key]=state;
     return result;
   } catch(error) {
-    try {if(Object.keys(before).length) await changeFoundrySettings(before,true);if(ticker && Number.isFinite(oldFPS))ticker.maxFPS=oldFPS;}catch{/* Keep the original failure visible. */}
+    try {if(Object.keys(before).length) await changeFoundrySettings(before,true);if(ticker && Number.isFinite(oldFPS))setClientFrameTarget(ticker,oldFPS);}catch{/* Keep the original failure visible. */}
     if(previous?.handler && hooks?.on) hooks.on('canvasReady',previous.handler);
     globalThis[key]=previous;
     throw error;
@@ -48,16 +48,15 @@ function changeFrameLimit(limit) {
   if (limit !== null && ![0,30,60,90,120,144,165,180,240].includes(limit)) throw new Error('Choose a supported FPS limit.');
   const key = Symbol.for('foundry-client.frame-limit-backups');
   const backups = globalThis[key] ||= new WeakMap();
-  if (limit === null && !backups.has(ticker)) return {maxFPS:ticker.maxFPS,restored:true};
-  const original = ticker.maxFPS, first = !backups.has(ticker);
+  if (limit === null && !backups.has(ticker)) return {maxFPS:clientFrameTarget(ticker),restored:true};
+  const original = clientFrameTarget(ticker), first = !backups.has(ticker);
   if (first) backups.set(ticker, original);
   const target = limit === null ? backups.get(ticker) : limit;
   try {
-    ticker.maxFPS = target;
-    if (Math.abs(ticker.maxFPS - target) > 0.01) throw new Error('The canvas did not accept that FPS limit.');
-  } catch (error) { ticker.maxFPS = original; if(first)backups.delete(ticker); throw error; }
+    setClientFrameTarget(ticker,target);
+  } catch (error) { setClientFrameTarget(ticker,original); if(first)backups.delete(ticker); throw error; }
   if (limit === null) backups.delete(ticker);
-  return {maxFPS:ticker.maxFPS,restored:limit === null};
+  return {maxFPS:target,restored:limit === null};
 }
 
 function readFoundry() {
@@ -73,7 +72,7 @@ function readFoundry() {
     ready: !!g?.ready,
     version: String(g?.version || '').slice(0, 40),
     fps: typeof fps === 'number' && Number.isFinite(fps) ? Math.round(fps) : null,
-    frameLimit: typeof c?.app?.ticker?.maxFPS === 'number' && Number.isFinite(c.app.ticker.maxFPS) ? c.app.ticker.maxFPS : null,
+    frameLimit: Number.isFinite(clientFrameTarget(c?.app?.ticker)) ? clientFrameTarget(c.app.ticker) : null,
     webgl: gl ? (typeof gl.texImage3D === 'function' ? 'WebGL 2' : 'WebGL 1') : null,
     settings: values
   };
@@ -83,6 +82,7 @@ async function changeFoundrySettings(requested, restore = false) {
   const g = globalThis.game;
   if (!g?.ready || !g.settings?.settings) throw new Error('Join a Foundry world before applying a rendering profile.');
   const before = {}, applied = [], skipped = [];
+  const ticker = globalThis.canvas?.app?.ticker, beforeFPS = clientFrameTarget(ticker);
   // Preflight everything before any writes. Only registered client settings qualify.
   const plan = [];
   for (const [key, value] of Object.entries(requested)) {
@@ -98,10 +98,11 @@ async function changeFoundrySettings(requested, restore = false) {
   }
   if (!plan.length) throw new Error('This world does not expose supported client rendering settings. Use Foundry’s Configure Settings menu.');
   try {
-    for (const [key, value] of plan) { await g.settings.set('core', key, value); applied.push(key); }
+    for (const [key, value] of plan) { await g.settings.set('core', key, value); applied.push(key); if(key==='maxFPS'&&Number.isFinite(globalThis.canvas?.app?.ticker?.maxFPS))setClientFrameTarget(canvas.app.ticker,value); }
   } catch (error) {
     let rollbackFailed = false;
-    for (const key of applied.reverse()) { try { await g.settings.set('core', key, before[key]); } catch { rollbackFailed = true; } }
+    for (const key of applied.reverse()) { try { await g.settings.set('core', key, before[key]);if(key==='maxFPS'&&Number.isFinite(globalThis.canvas?.app?.ticker?.maxFPS))setClientFrameTarget(canvas.app.ticker,before[key]); } catch { rollbackFailed = true; } }
+    if (Number.isFinite(beforeFPS)) { try { setClientFrameTarget(ticker, beforeFPS); } catch { rollbackFailed = true; } }
     throw new Error(rollbackFailed ? 'A setting failed and rollback was incomplete. Check Foundry’s Configure Settings menu.' : 'Could not apply settings; previous values were restored.');
   }
   return { before, applied, skipped, restore, reload: plan.some(([key]) => !!g.settings.settings.get(`core.${key}`).requiresReload) };

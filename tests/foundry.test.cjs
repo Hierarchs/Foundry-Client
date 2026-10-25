@@ -2,7 +2,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const vm = require('node:vm');
-const adapter = require('node:fs').readFileSync(require('node:path').join(__dirname,'../src/foundry-adapter.js'),'utf8');
+const adapter = ['performance-adapter.js','foundry-adapter.js'].map(file=>require('node:fs').readFileSync(require('node:path').join(__dirname,'../src',file),'utf8')).join('\n');
 const { readScript, settingsScript } = require('../src/foundry.cjs');
 
 function mockGame(options = {}) {
@@ -62,4 +62,11 @@ test('profiles reject invalid choice values and never apply before the world is 
   await assert.rejects(vm.runInContext(settingsScript({ performanceMode: 99, maxFPS: 500 }), game.context), /supported client/);
   game.context.game.ready = false;
   await assert.rejects(vm.runInContext(settingsScript({ maxFPS: 30 }), game.context), /Join a Foundry world/);
+});
+
+test('failed profiles preserve an existing live canvas FPS override', async () => {
+  const game = mockGame({ fail: 'pixelRatioResolutionScaling' });
+  game.context.canvas.app.ticker.maxFPS = 240;
+  await assert.rejects(vm.runInContext(settingsScript({ maxFPS: 30, pixelRatioResolutionScaling: false }), game.context), /restored/);
+  assert.equal(game.values.maxFPS, 60); assert.equal(game.context.canvas.app.ticker.maxFPS, 240);
 });

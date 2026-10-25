@@ -32,6 +32,7 @@ async function verify(){
     await page.getByRole('button',{name:'Preferences',exact:true}).click();
     await page.locator('#hud-compact').check();await page.locator('#hud-showTime').uncheck();await page.locator('#hud-showTitle').uncheck();
     await page.locator('#hud-focusKey').selectOption('H');await page.locator('#hud-libraryKey').selectOption('O');
+    await expect(page.locator('#library-toggle')).toHaveAttribute('title', /Ctrl\+Shift\+O/);
     await expect(page.locator('body')).toHaveClass(/hud-compact/);await expect(page.locator('#live-playtime')).toBeHidden();
     await expect(page.locator('#active-title')).toBeHidden();
     await page.keyboard.press('Control+Shift+O');await expect(page.locator('#page-sessions')).toBeVisible();

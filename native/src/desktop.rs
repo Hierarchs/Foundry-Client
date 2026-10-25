@@ -21,12 +21,14 @@ use tao::{
     dpi::{LogicalSize, PhysicalPosition, PhysicalSize},
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy, EventLoopWindowTarget},
+    platform::windows::WindowExtWindows,
     window::{Fullscreen, Window, WindowBuilder, WindowId},
 };
 use webview2_com::Microsoft::Web::WebView2::Win32::*;
 use windows::Win32::System::Power::{
     ES_CONTINUOUS, ES_DISPLAY_REQUIRED, ES_SYSTEM_REQUIRED, SetThreadExecutionState,
 };
+use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
 use wry::{
     MemoryUsageLevel, PermissionResponse, Rect, Theme, WebContext, WebView, WebViewBuilder,
     WebViewBuilderExtWindows, WebViewExtWindows,
@@ -85,6 +87,7 @@ struct Popup {
     view: WebView,
     _window: Window,
     layout_key: String,
+    memory_low: Option<bool>,
 }
 enum Work {
     WorldRead {
@@ -144,6 +147,12 @@ struct Client {
     world_ready: bool,
     world_applied: Option<String>,
     world_message: String,
+    telemetry_ready: bool,
+    telemetry_fps: bool,
+    telemetry_details: bool,
+    telemetry_reads: u64,
+    telemetry_installs: u64,
+    telemetry_status: Value,
     proxy: EventLoopProxy<NativeEvent>,
     testing: bool,
     exiting: bool,
@@ -238,6 +247,12 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         world_ready: false,
         world_applied: None,
         world_message: String::new(),
+        telemetry_ready: false,
+        telemetry_fps: false,
+        telemetry_details: false,
+        telemetry_reads: 0,
+        telemetry_installs: 0,
+        telemetry_status: json!({"enabled":false}),
         proxy,
         testing,
         exiting: false,
@@ -284,6 +299,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 WindowEvent::Resized(_)
                 | WindowEvent::ScaleFactorChanged { .. }
                 | WindowEvent::Focused(_) => {
+                    if client.store.data.preferences.adaptive_fps {
+                        client.playtime_tick = Instant::now();
+                    }
                     client.layout();
                     client.power();
                     client.remember_main();
@@ -300,12 +318,14 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                             client.popouts.remove(&window_id);
                         }
                         WindowEvent::Moved(_) => client.remember_popup(window_id),
+                        WindowEvent::Focused(_) => client.popup_memory(window_id, None),
                         WindowEvent::Resized(size) => {
                             let _ = popup.view.set_bounds(Rect {
                                 position: PhysicalPosition::new(0, 0).into(),
                                 size: size.into(),
                             });
                             client.remember_popup(window_id);
+                            client.popup_memory(window_id, None);
                         }
                         _ => (),
                     }
@@ -320,9 +340,22 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     && Instant::now() >= client.playtime_tick
                     && !client.pending.contains_key(&playtime::REQUEST)
                 {
-                    client.playtime_tick = Instant::now() + Duration::from_secs(5);
+                    let interval = if client.telemetry_fps
+                        && !client.overlay
+                        && !client.focus
+                        && !client.window.is_minimized()
+                    {
+                        Duration::from_millis(2500)
+                    } else {
+                        Duration::from_secs(5)
+                    };
+                    client.playtime_tick = Instant::now() + interval;
+                    let script = client.telemetry_script();
+                    for id in client.popouts.keys().copied().collect::<Vec<_>>() {
+                        client.popup_memory(id, None);
+                    }
                     if client
-                        .begin_script(playtime::REQUEST, playtime::SAMPLE.into(), Work::Frame)
+                        .begin_script(playtime::REQUEST, script, Work::Frame)
                         .is_err()
                     {
                         client.observe_playtime(None);
@@ -392,6 +425,45 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 impl Client {
+    fn foreground(window: &Window) -> bool {
+        // WebView2's child HWND can own keyboard focus while its top-level window stays active.
+        unsafe { GetForegroundWindow().0 as isize == window.hwnd() }
+    }
+    fn popup_memory(&mut self, id: WindowId, focused: Option<bool>) {
+        if let Some(popup) = self.popouts.get_mut(&id) {
+            let low = self.store.data.preferences.economize_popouts
+                && (popup._window.is_minimized()
+                    || !popup._window.is_visible()
+                    || !focused.unwrap_or_else(|| Self::foreground(&popup._window)));
+            if popup.memory_low != Some(low)
+                && popup
+                    .view
+                    .set_memory_usage_level(if low {
+                        MemoryUsageLevel::Low
+                    } else {
+                        MemoryUsageLevel::Normal
+                    })
+                    .is_ok()
+            {
+                popup.memory_low = Some(low);
+            }
+        }
+    }
+    fn telemetry_script(&mut self) -> String {
+        self.telemetry_reads += 1;
+        let options = json!({"enabled":self.store.data.preferences.adaptive_fps,"idleFPS":self.store.data.preferences.idle_fps,"inactive":self.overlay||self.window.is_minimized()||!Self::foreground(&self.window)});
+        if !self.telemetry_ready {
+            self.telemetry_installs += 1;
+            format!(
+                "(()=>{{{};const api=Object.freeze({{sample:readClientTelemetry}});globalThis[Symbol.for('foundry-client.runtime')]=api;return api.sample({options});}})()",
+                web::ADAPTER
+            )
+        } else {
+            format!(
+                "(()=>{{const api=globalThis[Symbol.for('foundry-client.runtime')];return api?api.sample({options}):{{runtimeMissing:true}};}})()"
+            )
+        }
+    }
     fn world_operation(
         &mut self,
         id: u64,
@@ -421,6 +493,20 @@ impl Client {
         )
     }
     fn observe_playtime(&mut self, value: Option<Value>) {
+        if value.as_ref().is_some_and(|v| v["runtimeMissing"] == true) {
+            self.telemetry_ready = false;
+            self.playtime_tick = Instant::now();
+            return;
+        }
+        self.telemetry_ready = value.is_some();
+        self.telemetry_status = value
+            .as_ref()
+            .map(|v| v["adaptive"].clone())
+            .unwrap_or(json!({"enabled":false}));
+        let fps = value
+            .as_ref()
+            .map(|v| v["fps"].clone())
+            .unwrap_or(Value::Null);
         let sample = value.as_ref().and_then(|value| {
             let id = value["id"]
                 .as_str()
@@ -484,9 +570,14 @@ impl Client {
             self.world_message = error.chars().take(200).collect();
             changed = true;
         }
-        let _ = self.ui.evaluate_script(&format!(
-            "window.__clientPlaytime?.({});",
+        let stats = if self.telemetry_details {
             self.playtime.snapshot(&self.store.data.playtime)
+        } else {
+            self.playtime.summary(&self.store.data.playtime)
+        };
+        let _ = self.ui.evaluate_script(&format!(
+            "window.__clientTelemetry?.({});",
+            json!({"playtime":stats,"fps":fps,"adaptive":self.telemetry_status})
         ));
         if changed || previous_ready != self.world_ready {
             self.publish();
@@ -558,7 +649,7 @@ impl Client {
         }
         json!({"sessions":self.store.data.sessions,"preferences":self.store.data.preferences,"profiles":core::profiles(),"active":active,
             "status":{"phase":self.phase,"message":self.message},"overlay":self.overlay,"focusMode":self.focus,"warning":self.store.warning,"updates":self.updates,"playtime":self.playtime.snapshot(&self.store.data.playtime),
-            "hud":self.store.data.hud,"recovery":if self.active.is_none(){self.store.data.recovery.as_ref()}else{None},
+            "hud":self.store.data.hud,"adaptive":self.telemetry_status,"recovery":if self.active.is_none(){self.store.data.recovery.as_ref()}else{None},
             "world":self.world.as_ref().map(|(key,name)|json!({"key":key,"name":name,"ready":self.world_ready,"settings":self.store.data.world_settings.get(key)})),"worldMessage":self.world_message,
             "runtime":{"app":env!("CARGO_PKG_VERSION"),"backend":"rust","rust":env!("FOUNDRY_RUST_VERSION"),"engine":"WebView2","chromium":wry::webview_version().unwrap_or_else(|_| "Unknown".into()),"ramGB":self.metrics.ram_gb()}})
     }
@@ -645,6 +736,8 @@ impl Client {
         }
     }
     fn release(&mut self) {
+        self.telemetry_ready = false;
+        self.telemetry_status = json!({"enabled":false});
         self.world = None;
         self.world_ready = false;
         self.world_applied = None;
@@ -683,6 +776,9 @@ impl Client {
         self.power();
     }
     fn set_overlay(&mut self, shown: bool) {
+        if self.overlay != shown && self.store.data.preferences.adaptive_fps {
+            self.playtime_tick = Instant::now();
+        }
         self.overlay = shown;
         if shown {
             self.focus = false;
@@ -967,6 +1063,29 @@ impl Client {
     fn command(&mut self, request: &Rpc) -> core::Result<Option<Value>> {
         let input = &request.payload;
         let value = match request.action.as_str() {
+            #[cfg(feature = "test-driver")]
+            "test-performance" if self.testing => {
+                if input["focusMain"] == true {
+                    self.window.set_focus();
+                    self.playtime_tick = Instant::now();
+                }
+                if let Some(focused) = input["popupFocus"].as_bool() {
+                    for id in self.popouts.keys().copied().collect::<Vec<_>>() {
+                        self.popup_memory(id, Some(focused));
+                    }
+                }
+                json!({"reads":self.telemetry_reads,"installs":self.telemetry_installs,"foreground":Self::foreground(&self.window),"popouts":self.popouts.values().map(|p|p.memory_low).collect::<Vec<_>>()})
+            }
+            "telemetry" => {
+                let fps = input["fps"].as_bool().unwrap_or(false);
+                let details = input["details"].as_bool().unwrap_or(false);
+                if fps != self.telemetry_fps || details != self.telemetry_details {
+                    self.playtime_tick = Instant::now();
+                }
+                self.telemetry_fps = fps;
+                self.telemetry_details = details;
+                json!(true)
+            }
             "hud" => {
                 self.store.update_hud(input)?;
                 self.hotkeys
@@ -1178,6 +1297,10 @@ impl Client {
                         .store(self.store.data.preferences.allow_media, Ordering::Relaxed);
                 }
                 self.layout();
+                self.playtime_tick = Instant::now();
+                for id in self.popouts.keys().copied().collect::<Vec<_>>() {
+                    self.popup_memory(id, None);
+                }
                 self.power();
                 self.publish();
                 self.snapshot()
@@ -1285,6 +1408,7 @@ impl Client {
                 }
             }
             NativeEvent::Loading(generation) if generation == self.generation => {
+                self.telemetry_ready = false;
                 self.world_applied = None;
                 self.observe_playtime(None);
                 self.status("loading", "Connecting to your table…")
@@ -1473,8 +1597,10 @@ impl Client {
                 view,
                 _window: window,
                 layout_key,
+                memory_low: None,
             },
         );
+        self.popup_memory(id, None);
         #[cfg(feature = "test-driver")]
         eprintln!("popup attached, total={}", self.popouts.len());
         Ok(())

@@ -21,7 +21,11 @@ use wry::{
 };
 
 pub const UI_URL: &str = "https://foundry.localhost/index.html";
-pub const ADAPTER: &str = include_str!("../../src/foundry-adapter.js");
+pub const ADAPTER: &str = concat!(
+    include_str!("../../src/performance-adapter.js"),
+    "\n",
+    include_str!("../../src/foundry-adapter.js")
+);
 
 #[derive(Clone)]
 pub struct Trust {

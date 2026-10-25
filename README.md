@@ -4,7 +4,7 @@ A dedicated **Windows 10/11 x64 client for Foundry Virtual Tabletop V14**, inclu
 
 ## Run it
 
-Download/extract the portable archive from `release/rust/`, then run **Foundry Client.exe**. Alternatively, use **Foundry-Client-Rust-Setup-0.4.0-x64.exe**. The installer creates separate Rust-edition shortcuts and leaves an existing Electron installation intact.
+Download/extract the portable archive from `release/rust/`, then run **Foundry Client.exe**. Alternatively, use **Foundry-Client-Rust-Setup-0.5.0-x64.exe**. The installer creates separate Rust-edition shortcuts and leaves an existing Electron installation intact.
 
 1. Start your game on Sqyre and copy its **game join link**.
 2. Paste it into **Join a session**, optionally name it, and click **Join session**.
@@ -54,9 +54,9 @@ HTTPS certificate validation remains enabled. Camera, microphone, and other secu
 - Removes the Electron/Node host and the Chromium runtime bundled with the old application. The Rust release executable is about **1.6 MiB**, excluding the separately installed WebView2 runtime and dependency notices.
 - Uses one WebView2 environment with isolated browser profiles per server origin. Switching sessions drops the old game view and its pop-outs while retaining cached assets and supported login cookies.
 - Uses Rust for URL validation, atomic settings writes, window lifetime, cache clearing, diagnostics, and rendering-profile backups.
-- Uses an event loop that sleeps when idle. Full process diagnostics run only when requested. The optional gameplay FPS monitor reads only the canvas ticker, without scanning processes.
+- Uses an event loop that sleeps when idle. Full process diagnostics run only when requested. Gameplay FPS, connection status, playtime and adaptive FPS share one lightweight sample, without scanning processes.
 - Requests the dedicated GPU when enabled. Hardware acceleration, browser sandboxing, certificate verification, and GPU safety checks remain enabled.
-- Requests lower WebView2 memory targets for inactive views and minimized windows. Visible gameplay keeps its normal memory target.
+- Requests lower WebView2 memory targets for inactive views and minimized windows, including unfocused pop-outs. Focused gameplay keeps its normal memory target.
 
 ### Measured limits
 
@@ -71,6 +71,18 @@ The saved [comparison report](benchmarks/host-overhead.json) uses three alternat
 
 ## Rendering controls
 
+### Adaptive FPS and pop-out memory
+
+Version 0.5.0 adds **Preferences → Performance behavior**. **Adaptive FPS** is opt-in. It applies a 15, 30 (default), or 60 FPS idle ceiling after 30 seconds without mouse/keyboard input, when the game loses focus, or while the game is hidden. Input/focus restores the active target, including 240 FPS or uncapped. The idle ceiling never raises a lower active target. Manual FPS changes, rendering profiles and remembered world settings update that active target while idle. Turning adaptive FPS off restores it and removes its input listeners and timer. Scene changes use the new canvas's target unless remembered world settings reapply a chosen limit.
+
+**Economize inactive pop-outs** is enabled by default. Unfocused, hidden or minimized pop-outs request WebView2's lower memory target; focusing them restores the normal target. This is a browser memory request, not a fixed RAM limit. Scripts and connections are not suspended. Disable the preference if switching between many sheets feels less responsive. The behavior follows [Microsoft's WebView2 performance guidance](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/performance). Actual savings depend on the browser and the loaded content.
+
+### Lighter telemetry
+
+The Rust host installs its bundled sampling helper once per document and reuses it. Playtime, connection status, adaptive FPS and the optional HUD FPS reading use one sample every five seconds, increasing to once every 2.5 seconds while the gameplay FPS display is visible. Hidden HUDs and minimized windows use the slower interval. The gameplay HUD no longer runs a separate diagnostics timer. Full process memory/CPU scans remain limited to the visible Performance page and explicit requests.
+
+Playtime history is sent with periodic samples only while its Preferences panel is open. Hidden history rows are not rebuilt, unchanged session/cache/runtime lists retain their existing elements, and HUD text changes only when its value changes. These changes reduce the client's own work; real Foundry scene FPS and RAM gains have not been measured.
+
 ### Remembered world settings
 
 In the Rust edition, join a V14 world and open **Performance → Remember this world**. Choose a rendering profile and/or FPS target, then click **Save and apply**. Only the checked choices are remembered. They are stored per server origin and world ID and reapplied on world entry, reload, and Foundry's public `canvasReady` scene event. **Forget and restore original** removes the saved choices and restores the values captured before the first remembered change. Original values are written locally before changes are made. Reload if Foundry requests it. Remembered choices take precedence over the session bookmark's suggested profile.
@@ -81,7 +93,7 @@ In the Rust edition, join a V14 world and open **Performance → Remember this w
 
 ### Reconnect and recovery
 
-When a loaded world's socket disconnects, the HUD shows **Connection lost** and a **Reconnect** button. Foundry can reconnect itself; the button explicitly reloads the game if needed. The client does not automatically reload over unsaved work. The connection status is checked with the existing five-second playtime sample, without extra diagnostic scans.
+When a loaded world's socket disconnects, the HUD shows **Connection lost** and a **Reconnect** button. Foundry can reconnect itself; the button explicitly reloads the game if needed. The client does not automatically reload over unsaved work. The connection status is checked with the shared playtime/FPS sample, without extra diagnostic scans.
 
 An active-session marker is saved on connection and cleared on normal disconnect or close. After an unexpected client exit, the launcher offers **Recover session** or **Dismiss**. Recovery reopens the prior join link in its existing browser profile; it does not bypass sign-in or recover unsaved Foundry form edits. It requires a click rather than connecting automatically.
 
@@ -95,7 +107,7 @@ Version 0.3.0 adds **Canvas FPS limit** in Performance: 30, 60, 90, 120, 144, 16
 
 Version 0.3.1 adds **Preferences → Time played**, showing a cumulative total, the current connection, and a breakdown by Foundry world. A compact timer also appears in the game toolbar. It starts only after a world reports `game.ready` with a world ID, and pauses when the socket disconnects or the client leaves the game. Loaded games continue counting while minimized or while viewing client preferences. Login/setup screens do not count. Counters are local to this Windows user and keyed by server origin plus world ID.
 
-The Rust host samples the loaded game every five seconds without process diagnostics. Only intervals between two successful, connected samples count; transitions can undercount by a few seconds. Long gaps from computer sleep or suspension are discarded. Totals are saved every minute and on normal disconnect/exit, so an unexpected process termination may lose up to a minute. **Ctrl+Shift+F** restores a hidden client toolbar, **Ctrl+Shift+L** opens the library, and **F11** toggles fullscreen.
+The Rust host samples the loaded game every five seconds (2.5 seconds while the FPS HUD is monitoring) without process diagnostics. Only intervals between two successful, connected samples count; transitions can undercount by a few seconds. Long gaps from computer sleep or suspension are discarded. Totals are saved every minute and on normal disconnect/exit, so an unexpected process termination may lose up to a minute. **Ctrl+Shift+F** restores a hidden client toolbar, **Ctrl+Shift+L** opens the library, and **F11** toggles fullscreen.
 
 ## Multi-monitor layouts
 

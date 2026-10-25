@@ -7,7 +7,6 @@ use std::{
 };
 
 pub const REQUEST: u64 = u64::MAX;
-pub const SAMPLE: &str = "(()=>{const g=globalThis.game;if(g?.socket?.connected===false)return {connection:'offline'};if(!g?.ready||!g.world?.id)return null;return {id:String(g.world.id).slice(0,128),name:String(g.world.title||g.world.id).slice(0,100),worldError:String(globalThis[Symbol.for('foundry-client.world-settings')]?.error||'').slice(0,200)};})()";
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Record {
     pub name: String,
@@ -88,10 +87,15 @@ impl Tracker {
             .map(|r| json!({"name":r.name,"seconds":r.milliseconds/1000}))
             .collect();
         worlds.sort_by_key(|v| std::cmp::Reverse(v["seconds"].as_u64().unwrap_or(0)));
+        let mut result = self.summary(records);
+        result["worlds"] = json!(worlds);
+        result
+    }
+    pub fn summary(&self, records: &BTreeMap<String, Record>) -> Value {
         let total = records
             .values()
             .fold(0_u64, |sum, r| sum.saturating_add(r.milliseconds));
-        json!({"tracking":self.last.is_some(),"world":self.name,"sessionSeconds":self.session_ms/1000,"totalSeconds":total/1000,"worlds":worlds})
+        json!({"tracking":self.last.is_some(),"world":self.name,"sessionSeconds":self.session_ms/1000,"totalSeconds":total/1000})
     }
 }
 #[cfg(test)]

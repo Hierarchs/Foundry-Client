@@ -1,6 +1,7 @@
 fn main() {
     println!("cargo:rerun-if-changed=../src/ui");
     println!("cargo:rerun-if-changed=../src/foundry-adapter.js");
+    println!("cargo:rerun-if-changed=../src/performance-adapter.js");
     let compiler = std::process::Command::new("rustc")
         .arg("--version")
         .output()
