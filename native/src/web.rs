@@ -6,7 +6,7 @@ use std::{
     collections::HashSet,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU32, Ordering},
     },
 };
 use tao::{event_loop::EventLoopProxy, window::Window};
@@ -25,6 +25,7 @@ pub const ADAPTER: &str = include_str!("../../src/foundry-adapter.js");
 
 #[derive(Clone)]
 pub struct Trust {
+    pub hotkeys: Arc<AtomicU32>,
     pub initial: String,
     pub extra: Arc<Mutex<HashSet<String>>>,
     pub media: Arc<AtomicBool>,
@@ -42,6 +43,7 @@ pub fn launcher(
     context: &mut WebContext,
     args: String,
     proxy: EventLoopProxy<NativeEvent>,
+    hotkeys: Arc<AtomicU32>,
 ) -> wry::Result<WebView> {
     let rpc_proxy = proxy.clone();
     let view = WebViewBuilder::new_with_web_context(context)
@@ -93,7 +95,7 @@ pub fn launcher(
         .with_devtools(cfg!(feature = "test-driver"))
         .with_url("foundry://localhost/index.html")
         .build_as_child(window)?;
-    keyboard(&view, proxy)?;
+    keyboard(&view, proxy, hotkeys)?;
     Ok(view)
 }
 
@@ -145,7 +147,7 @@ pub fn wire(
     popup: Option<tao::window::WindowId>,
     proxy: EventLoopProxy<NativeEvent>,
 ) -> wry::Result<()> {
-    keyboard(view, proxy.clone())?;
+    keyboard(view, proxy.clone(), trust.hotkeys.clone())?;
     let failed_proxy = proxy.clone();
     if popup.is_none() {
         let loading_proxy = proxy.clone();
@@ -286,7 +288,11 @@ pub fn wire(
     Ok(())
 }
 
-pub fn keyboard(view: &WebView, proxy: EventLoopProxy<NativeEvent>) -> wry::Result<()> {
+pub fn keyboard(
+    view: &WebView,
+    proxy: EventLoopProxy<NativeEvent>,
+    hotkeys: Arc<AtomicU32>,
+) -> wry::Result<()> {
     let mut token = 0;
     unsafe {
         view.controller().add_AcceleratorKeyPressed(
@@ -305,8 +311,14 @@ pub fn keyboard(view: &WebView, proxy: EventLoopProxy<NativeEvent>) -> wry::Resu
                     let shift = GetKeyState(VK_SHIFT.0 as i32) < 0;
                     let action = match (key, ctrl, shift) {
                         (0x7A, _, _) => Some("fullscreen"),
-                        (0x46, true, true) => Some("focus"),
-                        (0x4C, true, true) => Some("library"),
+                        (key, true, true) if key == hotkeys.load(Ordering::Relaxed) & 255 => {
+                            Some("focus")
+                        }
+                        (key, true, true)
+                            if key == (hotkeys.load(Ordering::Relaxed) >> 8) & 255 =>
+                        {
+                            Some("library")
+                        }
                         (0x74, _, _) | (0x52, true, false) => Some("reload"),
                         _ => None,
                     };

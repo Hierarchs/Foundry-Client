@@ -40,6 +40,18 @@ test('profiles skip world settings and unsupported keys', async () => {
   assert.equal(game.values.performanceMode, 0); assert.equal(game.values.maxFPS, 60); assert.equal(game.values.pixelRatioResolutionScaling, false);
   assert.equal(changed.applied.length, 2); assert.ok(changed.skipped.includes('maxFPS')); assert.ok(changed.reload);
 });
+test('remembered world settings reapply on scene ready and restore original values', async () => {
+  const sample=mockGame(),handlers=new Set();sample.context.game.world={id:'world'};
+  sample.context.Hooks={on:(_name,fn)=>handlers.add(fn),off:(_name,fn)=>handlers.delete(fn)};
+  const run=options=>vm.runInContext(adapter+';configureWorldSettings('+JSON.stringify(options)+')',sample.context);
+  await run({settings:{performanceMode:0,maxFPS:30},fps:240});
+  assert.equal(sample.values.maxFPS,30);assert.equal(sample.context.canvas.app.ticker.maxFPS,240);assert.equal(handlers.size,1);
+  sample.context.canvas.app.ticker={maxFPS:30,FPS:30};sample.values.maxFPS=60;
+  for(const fn of handlers)await fn();
+  assert.equal(sample.values.maxFPS,30);assert.equal(sample.context.canvas.app.ticker.maxFPS,240);
+  await run({settings:{performanceMode:2,maxFPS:60},fps:null,forget:true,restoreFPS:60});
+  assert.equal(sample.values.maxFPS,60);assert.equal(sample.context.canvas.app.ticker.maxFPS,60);assert.equal(handlers.size,0);
+});
 test('settings rollback if an intermediate write fails', async () => {
   const game = mockGame({ fail: 'maxFPS' });
   await assert.rejects(vm.runInContext(settingsScript({ performanceMode: 0, maxFPS: 30 }), game.context), /restored/);

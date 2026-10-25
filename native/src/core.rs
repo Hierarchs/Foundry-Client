@@ -84,6 +84,10 @@ pub struct Session {
     #[serde(default = "balanced")]
     pub profile: String,
     pub last_joined: Option<String>,
+    #[serde(default)]
+    pub favorite: bool,
+    #[serde(default)]
+    pub group: String,
 }
 fn balanced() -> String {
     "balanced".into()
@@ -118,6 +122,9 @@ pub struct Data {
     pub backups: BTreeMap<String, BTreeMap<String, Value>>,
     pub layouts: BTreeMap<String, crate::layouts::Placement>,
     pub playtime: BTreeMap<String, crate::playtime::Record>,
+    pub hud: crate::features::Hud,
+    pub world_settings: BTreeMap<String, crate::features::WorldSettings>,
+    pub recovery: Option<Session>,
 }
 pub fn profiles() -> Value {
     json!({
@@ -190,6 +197,7 @@ impl Store {
                     if let Ok(url) = normalize_url(&session.url) {
                         session.url = url;
                         session.name = session.name.trim().chars().take(80).collect();
+                        session.group = session.group.trim().chars().take(40).collect();
                         if session.name.is_empty() {
                             session.name =
                                 Url::parse(&session.url).unwrap().host_str().unwrap().into();
@@ -241,6 +249,35 @@ impl Store {
                     data.playtime.insert(key.clone(), record);
                 }
             }
+        }
+        if let Ok(hud) = serde_json::from_value::<crate::features::Hud>(saved["hud"].clone())
+            && hud.valid()
+        {
+            data.hud = hud;
+        }
+        if let Some(configs) = saved["world_settings"].as_object() {
+            for (key, value) in configs.iter().take(1000) {
+                if key.len() == 64
+                    && key.chars().all(|c| c.is_ascii_hexdigit())
+                    && let Ok(mut config) =
+                        serde_json::from_value::<crate::features::WorldSettings>(value.clone())
+                    && config.valid()
+                {
+                    config.original =
+                        settings_values(&serde_json::to_value(config.original).unwrap());
+                    data.world_settings.insert(key.clone(), config);
+                }
+            }
+        }
+        if let Ok(mut recovery) = serde_json::from_value::<Session>(saved["recovery"].clone())
+            && let Ok(url) = normalize_url(&recovery.url)
+        {
+            recovery.url = url;
+            recovery.name = recovery.name.chars().take(80).collect();
+            if profiles().get(&recovery.profile).is_none() {
+                recovery.profile = balanced();
+            }
+            data.recovery = Some(recovery);
         }
         Ok(Self {
             data,
@@ -297,6 +334,13 @@ impl Store {
             url,
             profile: profile.into(),
             last_joined: previous.and_then(|s| s.last_joined.clone()),
+            favorite: input["favorite"]
+                .as_bool()
+                .unwrap_or_else(|| previous.is_some_and(|s| s.favorite)),
+            group: input["group"]
+                .as_str()
+                .map(|s| s.trim().chars().take(40).collect())
+                .unwrap_or_else(|| previous.map(|s| s.group.clone()).unwrap_or_default()),
         })
     }
     pub fn save(&mut self, input: &Value) -> Result<String> {

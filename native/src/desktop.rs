@@ -1,5 +1,6 @@
 use crate::{
     core::{self, Session, Store},
+    features::{self, WorldSettings},
     layouts,
     metrics::Metrics,
     playtime, updates,
@@ -12,7 +13,7 @@ use std::{
     path::PathBuf,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU32, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -86,11 +87,23 @@ struct Popup {
     layout_key: String,
 }
 enum Work {
+    WorldRead {
+        key: String,
+        config: WorldSettings,
+        forget: bool,
+    },
+    WorldWrite {
+        key: String,
+        forget: bool,
+    },
     FrameLimit,
     Frame,
     Diagnostic(Value),
     ProfileRead(Option<String>),
-    ProfileWrite { key: String, restore: bool },
+    ProfileWrite {
+        key: String,
+        restore: bool,
+    },
 }
 struct Pending {
     generation: u64,
@@ -126,6 +139,11 @@ struct Client {
     playtime_tick: Instant,
     playtime_save: Instant,
     playtime_dirty: bool,
+    hotkeys: Arc<AtomicU32>,
+    world: Option<(String, String)>,
+    world_ready: bool,
+    world_applied: Option<String>,
+    world_message: String,
     proxy: EventLoopProxy<NativeEvent>,
     testing: bool,
     exiting: bool,
@@ -185,7 +203,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             " --remote-debugging-port={port} --remote-debugging-address=127.0.0.1"
         ));
     }
-    let ui = web::launcher(&window, &mut context, args, proxy.clone())?;
+    let hotkeys = Arc::new(AtomicU32::new(store.data.hud.keys()));
+    let ui = web::launcher(&window, &mut context, args, proxy.clone(), hotkeys.clone())?;
     let mut client = Client {
         ui,
         game: None,
@@ -214,6 +233,11 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         playtime_tick: Instant::now(),
         playtime_save: Instant::now() + Duration::from_secs(60),
         playtime_dirty: false,
+        hotkeys,
+        world: None,
+        world_ready: false,
+        world_applied: None,
+        world_message: String::new(),
         proxy,
         testing,
         exiting: false,
@@ -336,6 +360,12 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     .collect();
                 for id in expired {
                     client.pending.remove(&id);
+                    if id == features::WORLD_REQUEST {
+                        client.world_message =
+                            "The world settings operation timed out. Try saving again.".into();
+                        client.publish();
+                        continue;
+                    }
                     if id == playtime::REQUEST {
                         client.observe_playtime(None);
                         continue;
@@ -362,13 +392,41 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 impl Client {
+    fn world_operation(
+        &mut self,
+        id: u64,
+        key: String,
+        config: WorldSettings,
+        forget: bool,
+    ) -> core::Result<()> {
+        if !self.world_ready {
+            return Err("Join a loaded world first.".into());
+        }
+        if self
+            .pending
+            .values()
+            .any(|p| !matches!(p.work, Work::Frame | Work::Diagnostic(_)))
+        {
+            return Err("Wait for the current rendering operation to finish.".into());
+        }
+        self.world_applied = Some(key.clone());
+        self.begin_script(
+            id,
+            format!("(()=>{{{};return readFoundry();}})()", web::ADAPTER),
+            Work::WorldRead {
+                key,
+                config,
+                forget,
+            },
+        )
+    }
     fn observe_playtime(&mut self, value: Option<Value>) {
         let sample = value.as_ref().and_then(|value| {
             let id = value["id"]
                 .as_str()
                 .filter(|s| !s.is_empty() && s.len() <= 128)?;
             let origin = core::origin(&self.active.as_ref()?.url).ok()?;
-            let name = value["name"]
+            let name: String = value["name"]
                 .as_str()
                 .unwrap_or(id)
                 .chars()
@@ -376,13 +434,63 @@ impl Client {
                 .collect();
             Some((playtime::identity(&origin, id), name))
         });
+        let previous_ready = self.world_ready;
+        let mut changed = false;
+        self.world_ready = sample.is_some();
+        if let Some((key, name)) = &sample
+            && self.world.as_ref().map(|w| &w.0) != Some(key)
+        {
+            self.world = Some((key.clone(), name.clone()));
+            self.world_applied = None;
+            self.world_message.clear();
+            changed = true;
+        }
+        if value.as_ref().is_some_and(|v| v["connection"] == "offline")
+            && self.world.is_some()
+            && self.phase == "connected"
+        {
+            self.phase = "offline".into();
+            self.message =
+                "Connection lost. Foundry may reconnect automatically, or you can reload.".into();
+            self.focus = false;
+            self.layout();
+            changed = true;
+        } else if self.world_ready && self.phase == "offline" {
+            self.phase = "connected".into();
+            self.message = "Reconnected to your table.".into();
+            changed = true;
+        }
         self.playtime_dirty |=
             self.playtime
                 .observe(Instant::now(), sample, &mut self.store.data.playtime);
+        if let Some((key, _)) = self.world.clone()
+            && self.world_ready
+            && self.world_applied.as_ref() != Some(&key)
+            && let Some(config) = self.store.data.world_settings.get(&key).cloned()
+            && !self
+                .pending
+                .values()
+                .any(|p| !matches!(p.work, Work::Frame | Work::Diagnostic(_)))
+            && let Err(error) = self.world_operation(features::WORLD_REQUEST, key, config, false)
+        {
+            self.world_message = error;
+        }
+        if let Some(error) = value
+            .as_ref()
+            .and_then(|v| v["worldError"].as_str())
+            .filter(|e| !e.is_empty())
+            && self.world_message != error
+        {
+            self.world_message = error.chars().take(200).collect();
+            changed = true;
+        }
         let _ = self.ui.evaluate_script(&format!(
             "window.__clientPlaytime?.({});",
             self.playtime.snapshot(&self.store.data.playtime)
         ));
+        if changed || previous_ready != self.world_ready {
+            self.publish();
+        }
     }
     fn save_playtime(&mut self) {
         self.playtime_save = Instant::now() + Duration::from_secs(60);
@@ -450,6 +558,8 @@ impl Client {
         }
         json!({"sessions":self.store.data.sessions,"preferences":self.store.data.preferences,"profiles":core::profiles(),"active":active,
             "status":{"phase":self.phase,"message":self.message},"overlay":self.overlay,"focusMode":self.focus,"warning":self.store.warning,"updates":self.updates,"playtime":self.playtime.snapshot(&self.store.data.playtime),
+            "hud":self.store.data.hud,"recovery":if self.active.is_none(){self.store.data.recovery.as_ref()}else{None},
+            "world":self.world.as_ref().map(|(key,name)|json!({"key":key,"name":name,"ready":self.world_ready,"settings":self.store.data.world_settings.get(key)})),"worldMessage":self.world_message,
             "runtime":{"app":env!("CARGO_PKG_VERSION"),"backend":"rust","rust":env!("FOUNDRY_RUST_VERSION"),"engine":"WebView2","chromium":wry::webview_version().unwrap_or_else(|_| "Unknown".into()),"ramGB":self.metrics.ram_gb()}})
     }
     fn publish(&self) {
@@ -535,6 +645,16 @@ impl Client {
         }
     }
     fn release(&mut self) {
+        self.world = None;
+        self.world_ready = false;
+        self.world_applied = None;
+        self.world_message.clear();
+        if self.active.is_some() {
+            self.store.data.recovery = None;
+            if let Err(error) = self.store.write() {
+                self.store.warning = Some(error);
+            }
+        }
         self.playtime.reset();
         self.save_playtime();
         self.playtime_tick = Instant::now();
@@ -552,7 +672,7 @@ impl Client {
         let stale: Vec<_> = self.pending.keys().copied().collect();
         self.pending.clear();
         for id in stale {
-            if id == playtime::REQUEST {
+            if id == playtime::REQUEST || id == features::WORLD_REQUEST {
                 continue;
             }
             self.reply(
@@ -580,6 +700,7 @@ impl Client {
         }
         self.release();
         let trust = Trust {
+            hotkeys: self.hotkeys.clone(),
             initial: item.url.clone(),
             extra: Arc::new(Mutex::new(HashSet::new())),
             media: Arc::new(AtomicBool::new(self.store.data.preferences.allow_media)),
@@ -604,6 +725,10 @@ impl Client {
                 self.release();
                 return Err(format!("Could not create the game renderer: {e}"));
             }
+        }
+        self.store.data.recovery = Some(item.clone());
+        if let Err(error) = self.store.write() {
+            self.store.warning = Some(error);
         }
         if self.active_saved {
             if let Some(saved) = self
@@ -693,7 +818,34 @@ impl Client {
             self.observe_playtime(result.ok());
             return;
         }
+        let is_world_operation = matches!(
+            &pending.work,
+            Work::WorldRead { .. } | Work::WorldWrite { .. }
+        );
         let result = result.and_then(|value| match pending.work {
+            Work::WorldRead{key,mut config,forget} => {
+                if value["ready"]!=true||value["version"].as_str().is_none_or(|v|!(v=="14"||v.starts_with("14."))) {return Err("Remembered settings require a loaded Foundry V14 world.".into());}
+                if !forget {
+                    if let Some(previous)=self.store.data.world_settings.get(&key) {config.original=previous.original.clone();config.original_fps=previous.original_fps;}
+                    if config.original.is_empty(){config.original=core::settings_values(&value["settings"]);}
+                    if config.original_fps.is_none(){config.original_fps=value["frameLimit"].as_f64().filter(|n|(0.0..=1000.0).contains(n));}
+                    let previous=self.store.data.world_settings.insert(key.clone(),config.clone());
+                    if let Err(error)=self.store.write() {
+                        if let Some(previous)=previous{self.store.data.world_settings.insert(key.clone(),previous);}else{self.store.data.world_settings.remove(&key);}
+                        return Err(error);
+                    }
+                }
+                let settings=config.profile.as_ref().map(|p|core::profiles()[p]["settings"].clone()).unwrap_or(json!({}));
+                let options=json!({"settings":if forget{serde_json::to_value(&config.original).unwrap()}else{settings},"fps":config.fps,"forget":forget,"restoreFPS":config.original_fps});
+                self.begin_script(id,format!("(async()=>{{{};return await configureWorldSettings({options});}})()",web::ADAPTER),Work::WorldWrite{key,forget})?;
+                Ok(None)
+            }
+            Work::WorldWrite{key,forget} => {
+                if forget {self.store.data.world_settings.remove(&key);self.store.write()?;}
+                self.world_message=if forget{"Remembered settings removed and original values restored."}else{"Settings saved and applied. FPS will reapply after scene changes."}.into();
+                if value["reload"]==true{self.world_message.push_str(" Reload the game to finish applying.");}
+                self.publish();Ok(Some(self.snapshot()))
+            }
             Work::FrameLimit => Ok(Some(value)),
             Work::Diagnostic(mut metrics) => {
                 metrics["foundry"] = value;
@@ -764,9 +916,21 @@ impl Client {
             }
         });
         match result {
-            Ok(Some(value)) => self.reply(id, Ok(value)),
+            Ok(Some(value)) => {
+                if id != features::WORLD_REQUEST {
+                    self.reply(id, Ok(value));
+                }
+            }
             Ok(None) => (),
-            Err(error) => self.reply(id, Err(error)),
+            Err(error) => {
+                if is_world_operation {
+                    self.world_message = error.clone();
+                    self.publish();
+                }
+                if id != features::WORLD_REQUEST {
+                    self.reply(id, Err(error));
+                }
+            }
         }
     }
     fn cache(&mut self, id: u64, session_id: &Value) -> core::Result<()> {
@@ -803,6 +967,104 @@ impl Client {
     fn command(&mut self, request: &Rpc) -> core::Result<Option<Value>> {
         let input = &request.payload;
         let value = match request.action.as_str() {
+            "hud" => {
+                self.store.update_hud(input)?;
+                self.hotkeys
+                    .store(self.store.data.hud.keys(), Ordering::Relaxed);
+                self.publish();
+                self.snapshot()
+            }
+            "organize" => {
+                self.store.organize(input)?;
+                self.publish();
+                self.snapshot()
+            }
+            "recover" => {
+                let mut saved = serde_json::to_value(
+                    self.store
+                        .data
+                        .recovery
+                        .as_ref()
+                        .ok_or("No session needs recovery.")?,
+                )
+                .unwrap();
+                saved["id"] = Value::Null;
+                self.connect(&saved)?
+            }
+            "dismiss-recovery" => {
+                self.store.data.recovery = None;
+                self.store.write()?;
+                self.publish();
+                self.snapshot()
+            }
+            "remember-world" => {
+                let key = self
+                    .world
+                    .as_ref()
+                    .ok_or("Join a loaded world first.")?
+                    .0
+                    .clone();
+                let mut config: WorldSettings = serde_json::from_value(input.clone())
+                    .map_err(|_| "Choose valid world settings.")?;
+                if !config.valid() {
+                    return Err("Choose a rendering profile or FPS limit to remember.".into());
+                }
+                config.original.clear();
+                config.original_fps = None;
+                self.world_operation(request.id, key, config, false)?;
+                return Ok(None);
+            }
+            "forget-world" => {
+                let key = self
+                    .world
+                    .as_ref()
+                    .ok_or("Join a loaded world first.")?
+                    .0
+                    .clone();
+                let config = self
+                    .store
+                    .data
+                    .world_settings
+                    .get(&key)
+                    .cloned()
+                    .ok_or("No settings are remembered for this world.")?;
+                self.world_operation(request.id, key, config, true)?;
+                return Ok(None);
+            }
+            "export-sessions" => {
+                if let Some(path) = rfd::FileDialog::new()
+                    .set_file_name("foundry-sessions.json")
+                    .add_filter("Session export", &["json"])
+                    .save_file()
+                {
+                    std::fs::write(
+                        path,
+                        serde_json::to_vec_pretty(&self.store.export_sessions()).unwrap(),
+                    )
+                    .map_err(|e| e.to_string())?;
+                    json!(true)
+                } else {
+                    json!(false)
+                }
+            }
+            "import-sessions" => {
+                if let Some(path) = rfd::FileDialog::new()
+                    .add_filter("Session export", &["json"])
+                    .pick_file()
+                {
+                    if std::fs::metadata(&path).map_err(|e| e.to_string())?.len() > 1_048_576 {
+                        return Err("Choose an export smaller than 1 MB.".into());
+                    }
+                    let value: Value =
+                        serde_json::from_slice(&std::fs::read(path).map_err(|e| e.to_string())?)
+                            .map_err(|_| "Invalid session export.")?;
+                    let count = self.store.import_sessions(&value)?;
+                    self.publish();
+                    json!({"state":self.snapshot(),"added":count})
+                } else {
+                    Value::Null
+                }
+            }
             #[cfg(feature = "test-driver")]
             "test-layout" if self.testing => {
                 if input.is_object()
@@ -1023,6 +1285,7 @@ impl Client {
                 }
             }
             NativeEvent::Loading(generation) if generation == self.generation => {
+                self.world_applied = None;
                 self.observe_playtime(None);
                 self.status("loading", "Connecting to your table…")
             }

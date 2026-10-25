@@ -52,6 +52,7 @@ const values=JSON.parse(localStorage.getItem('settings')||'{"performanceMode":2,
 const definitions=new Map([['core.performanceMode',{scope:'client',type:Number,choices:{0:'Low',1:'Medium',2:'High'}}],['core.maxFPS',{scope:'client',type:Number,range:{min:0,max:120}}],['core.pixelRatioResolutionScaling',{scope:'client',type:Boolean}]]);
 window.game={ready:true,version:'14.368',world:{id:'native-world',title:'Native integration world'},socket:{connected:true},settings:{settings:definitions,get:(_,k)=>values[k],set:async(_,k,v)=>{await new Promise(r=>setTimeout(r,20));values[k]=v;localStorage.setItem('settings',JSON.stringify(values));return v}}};
 const gl=document.querySelector('#map').getContext('webgl2');
+const sceneHooks=new Set();window.Hooks={on:(name,fn)=>{if(name==='canvasReady')sceneHooks.add(fn);return fn;},off:(_name,fn)=>sceneHooks.delete(fn),callAll:async()=>{for(const fn of [...sceneHooks])await fn();}};
 window.canvas={app:{ticker:{FPS:58,maxFPS:60},renderer:{gl}}};
 if(gl){gl.clearColor(.12,.18,.22,1);gl.clear(gl.COLOR_BUFFER_BIT)}
 document.querySelector('#popout').onclick=()=>{const w=window.open('about:blank','sheet');window.detached=w;if(w)w.document.body.textContent='Detached native sheet';};
@@ -196,4 +197,4 @@ async function verify() {
   } finally { if(application)await application.close();await new Promise(resolve=>server.close(resolve)); }
 }
 if(require.main===module)verify().catch(error=>{console.error(error);process.exitCode=1;});
-module.exports={launch};
+module.exports={launch,world};

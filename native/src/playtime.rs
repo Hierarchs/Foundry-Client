@@ -7,7 +7,7 @@ use std::{
 };
 
 pub const REQUEST: u64 = u64::MAX;
-pub const SAMPLE: &str = "(()=>{const g=globalThis.game;if(!g?.ready||!g.world?.id||g.socket?.connected===false)return null;return {id:String(g.world.id).slice(0,128),name:String(g.world.title||g.world.id).slice(0,100)};})()";
+pub const SAMPLE: &str = "(()=>{const g=globalThis.game;if(g?.socket?.connected===false)return {connection:'offline'};if(!g?.ready||!g.world?.id)return null;return {id:String(g.world.id).slice(0,128),name:String(g.world.title||g.world.id).slice(0,100),worldError:String(globalThis[Symbol.for('foundry-client.world-settings')]?.error||'').slice(0,200)};})()";
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Record {
     pub name: String,

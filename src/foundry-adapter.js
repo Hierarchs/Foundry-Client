@@ -1,5 +1,46 @@
 'use strict';
 
+async function configureWorldSettings(options) {
+  const g=globalThis.game;
+  if(!g?.ready || !g.world?.id) throw new Error('Join a loaded world first.');
+  const key=Symbol.for('foundry-client.world-settings'), previous=globalThis[key];
+  const hooks=globalThis.Hooks || globalThis.foundry?.helpers?.Hooks;
+  const before=readFoundry().settings, ticker=globalThis.canvas?.app?.ticker, oldFPS=ticker?.maxFPS;
+  if(previous?.handler && hooks?.off) hooks.off('canvasReady',previous.handler);
+  try {
+    const desired=Object.fromEntries(Object.entries(options.settings || {}).filter(([name,value])=>before[name]!==value));
+    let result={applied:[],skipped:[],reload:false};
+    if(Object.keys(desired).length) result=await changeFoundrySettings(desired,!!options.forget);
+    if(options.forget) {
+      if(ticker && typeof oldFPS==='number') changeFrameLimit(null);
+      if(ticker && Number.isFinite(options.restoreFPS)) ticker.maxFPS=options.restoreFPS;
+      delete globalThis[key];return result;
+    }
+    if(!hooks?.on || !hooks?.off) throw new Error('This world does not expose supported scene-ready hooks.');
+    const state={id:String(g.world.id),error:'',handler:null,busy:false};
+    if(options.fps !== null && options.fps !== undefined) changeFrameLimit(options.fps);
+    state.handler=async()=>{
+      if(globalThis.game!==g || !g.ready || String(g.world?.id)!==state.id || state.busy)return;
+      state.busy=true;
+      try {
+        const current=readFoundry().settings;
+        const changed=Object.fromEntries(Object.entries(options.settings||{}).filter(([name,value])=>current[name]!==value));
+        if(Object.keys(changed).length) await changeFoundrySettings(changed);
+        if(options.fps !== null && options.fps !== undefined) changeFrameLimit(options.fps);
+        state.error='';
+      }catch(error){state.error=String(error.message||error);}finally{state.busy=false;}
+    };
+    hooks.on('canvasReady',state.handler);
+    globalThis[key]=state;
+    return result;
+  } catch(error) {
+    try {if(Object.keys(before).length) await changeFoundrySettings(before,true);if(ticker && Number.isFinite(oldFPS))ticker.maxFPS=oldFPS;}catch{/* Keep the original failure visible. */}
+    if(previous?.handler && hooks?.on) hooks.on('canvasReady',previous.handler);
+    globalThis[key]=previous;
+    throw error;
+  }
+}
+
 function changeFrameLimit(limit) {
   if (!globalThis.game?.ready || !/^14(?:\.|$)/.test(String(game.version))) throw new Error('Join a Foundry V14 world first.');
   const ticker = globalThis.canvas?.app?.ticker;
@@ -32,6 +73,7 @@ function readFoundry() {
     ready: !!g?.ready,
     version: String(g?.version || '').slice(0, 40),
     fps: typeof fps === 'number' && Number.isFinite(fps) ? Math.round(fps) : null,
+    frameLimit: typeof c?.app?.ticker?.maxFPS === 'number' && Number.isFinite(c.app.ticker.maxFPS) ? c.app.ticker.maxFPS : null,
     webgl: gl ? (typeof gl.texImage3D === 'function' ? 'WebGL 2' : 'WebGL 1') : null,
     settings: values
   };

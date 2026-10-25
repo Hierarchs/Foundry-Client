@@ -4,6 +4,7 @@ const $ = id => document.getElementById(id);
 let state = null, page = 'sessions', editingId = null, deleteId = null, performanceProfile = 'balanced';
 let diagnosticTimer = null, diagnosticBusy = false, toastTimer = null, previousActive = null;
 let liveFPS = false;
+let worldFormSignature = '';
 const invoke = (action, payload) => window.client.invoke(action, payload);
 const element = (tag, className, text) => { const el = document.createElement(tag); if (className) el.className = className; if (text !== undefined) el.textContent = text; return el; };
 const errorText = error => String(error.message || error).replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '');
@@ -28,9 +29,9 @@ function render(next) {
   $('active-title').textContent = state.active?.name || '';
   $('library-toggle').textContent = state.overlay ? 'Return to game' : 'Sessions';
   $('connection-banner').hidden = !state.active;
-  $('connection-banner').classList.toggle('error', state.status.phase === 'error');
+  $('connection-banner').classList.toggle('error', ['error','offline'].includes(state.status.phase));
   $('connection-message').textContent = state.status.phase === 'error' ? state.status.message : `${state.active?.name || 'Session'} · ${state.status.message}`;
-  $('retry').hidden = state.status.phase !== 'error';
+  $('retry').hidden = !['error','offline'].includes(state.status.phase);
   $('warning').hidden = !state.warning; $('warning').textContent = state.warning || '';
   $('session-count').textContent = state.sessions.length;
   $('list-count').textContent = String(state.sessions.length).padStart(2, '0');
@@ -50,14 +51,37 @@ function render(next) {
   }
   $('apply-profile').disabled = !state.active;
   $('restore-profile').disabled = !state.active;
-  renderSessions(); renderCache(); renderRuntime(); renderUpdates(); renderPlaytime(state.playtime); scheduleDiagnostics();
+  renderSessions(); renderCache(); renderRuntime(); renderUpdates(); renderFeatures(); renderPlaytime(state.playtime); scheduleDiagnostics();
+}
+function renderFeatures() {
+  const rust=state.runtime.backend==='rust',hud=state.hud||{showFps:true,showTime:true,showTitle:true,compact:false,focusKey:'F',libraryKey:'L'};
+  for(const id of ['hud-panel','world-settings-panel','session-organizer','session-group-field'])$(id).hidden=!rust;
+  document.body.classList.toggle('hud-compact',hud.compact);
+  $('live-fps').hidden=!hud.showFps;$('active-title').hidden=!hud.showTitle;
+  if(!hud.showFps){liveFPS=false;$('live-fps').textContent='FPS';$('live-fps').setAttribute('aria-pressed','false');}
+  for(const [name,value] of Object.entries(hud)){const field=$(`hud-${name}`);if(field){if(field.type==='checkbox')field.checked=value;else field.value=value;}}
+  $('focus-game').title=`Hide / restore HUD · Ctrl+Shift+${hud.focusKey}`;
+  $('library-toggle').title=`Session library · Ctrl+Shift+${hud.libraryKey}`;
+  $('focus-shortcut').textContent=`Ctrl Shift ${hud.focusKey}`;$('library-shortcut').textContent=`Ctrl Shift ${hud.libraryKey}`;
+  const lost=['offline','error'].includes(state.status.phase)&&!!state.active;
+  $('reconnect-game').hidden=$('connection-health').hidden=!lost;$('connection-health').textContent=lost?'Connection lost':'';
+  $('recovery-banner').hidden=!state.recovery;
+  $('recovery-message').textContent=state.recovery?`Previous session closed unexpectedly · ${state.recovery.name}`:'';
+  const world=state.world,settings=world?.settings,signature=JSON.stringify([world?.key,settings?.profile,settings?.fps]);
+  $('remember-world-name').textContent=world?world.name:'Join a loaded world first.';
+  $('save-world-settings').disabled=!world?.ready;$('forget-world-settings').disabled=!world?.ready||!settings;
+  $('world-settings-result').textContent=state.worldMessage||'';
+  if(signature!==worldFormSignature){worldFormSignature=signature;
+    $('remember-profile').checked=settings?settings.profile!==null:true;$('remember-fps').checked=settings?settings.fps!==null:true;
+    if(settings?.profile){performanceProfile=settings.profile;renderProfiles();}if(settings?.fps!==null&&settings?.fps!==undefined)$('frame-limit').value=String(settings.fps);
+  }
 }
 function playedDuration(seconds) {
   const whole=Math.floor(seconds || 0),minutes=Math.floor(whole/60),hours=Math.floor(minutes/60);
   return hours ? `${hours}h ${minutes%60}m` : `${minutes}m ${whole%60}s`;
 }
 function renderPlaytime(time) {
-  $('playtime-panel').hidden = $('live-playtime').hidden = !time;
+  $('playtime-panel').hidden = !time;$('live-playtime').hidden = !time||state?.hud?.showTime===false;
   if(!time)return;
   $('live-playtime').textContent = playedDuration(time.sessionSeconds);
   $('live-playtime').title = `${time.tracking ? 'Tracking' : 'Paused'} · ${time.sessionSeconds}s in this connection`;
@@ -86,9 +110,15 @@ function renderUpdates() {
   $('update-banner-text').textContent = available ? update.message : '';
 }
 function renderSessions() {
+  const group=$('session-group-filter').value,groups=[...new Set(state.sessions.map(s=>s.group).filter(Boolean))].sort();
+  $('session-group-filter').replaceChildren();const all=element('option','','All groups');all.value='';$('session-group-filter').append(all);
+  for(const name of groups){const option=element('option','',name);option.value=name;$('session-group-filter').append(option);}
+  $('session-group-filter').value=groups.includes(group)?group:'';
   $('session-list').replaceChildren();
   $('empty-state').hidden = state.sessions.length > 0;
-  const sorted = [...state.sessions].sort((a, b) => (b.lastJoined || '').localeCompare(a.lastJoined || ''));
+  const search=$('session-search').value.trim().toLocaleLowerCase(),selectedGroup=$('session-group-filter').value;
+  const sorted = [...state.sessions].filter(s=>(!$('favorites-only').checked||s.favorite)&&(!selectedGroup||s.group===selectedGroup)&&`${s.name} ${s.group||''} ${new URL(s.url).host}`.toLocaleLowerCase().includes(search)).sort((a, b) => Number(!!b.favorite)-Number(!!a.favorite)||(b.lastJoined || '').localeCompare(a.lastJoined || ''));
+  $('session-no-matches').hidden=sorted.length>0||state.sessions.length===0;
   for (const item of sorted) {
     const card = element('article', 'session-card');
     const top = element('div', 'session-card-top');
@@ -96,6 +126,7 @@ function renderSessions() {
     const info = element('div', 'session-info');
     info.append(element('h3', '', item.name), element('p', '', new URL(item.url).host));
     top.append(info);
+    if(item.group)info.append(element('small','',item.group));
     top.append(element('span', 'badge', new URL(item.url).hostname.endsWith('.sqyre.app') || new URL(item.url).hostname === 'sqyre.app' ? 'SQYRE' : 'FOUNDRY'));
     const bottom = element('div', 'session-card-bottom');
     const date = item.lastJoined ? `Joined ${new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(new Date(item.lastJoined))}` : 'Ready for your first visit';
@@ -103,6 +134,10 @@ function renderSessions() {
     const edit = element('button', 'card-edit', 'Edit'); edit.type = 'button'; edit.setAttribute('aria-label', `Edit ${item.name}`); edit.onclick = () => editSession(item);
     const remove = element('button', 'card-delete', 'Remove'); remove.type = 'button'; remove.setAttribute('aria-label', `Remove ${item.name}`); remove.onclick = () => { deleteId = item.id; $('delete-dialog').showModal(); };
     const join = element('button', 'secondary-button card-join', 'Join →'); join.type = 'button'; join.setAttribute('aria-label', `Join ${item.name}`); join.onclick = () => safely(async () => render(await invoke('connect', { id: item.id })), join);
+    if(state.runtime.backend==='rust'){
+      const favorite=element('button','text-button',item.favorite?'★':'☆');favorite.type='button';favorite.setAttribute('aria-label',`${item.favorite?'Unfavorite':'Favorite'} ${item.name}`);favorite.setAttribute('aria-pressed',!!item.favorite);
+      favorite.onclick=()=>safely(async()=>render(await invoke('organize',{id:item.id,favorite:!item.favorite})));bottom.append(favorite);
+    }
     bottom.append(edit, remove, join); card.append(top, bottom); $('session-list').append(card);
   }
 }
@@ -173,6 +208,7 @@ function newSession() {
   $('session-url').focus();
 }
 function editSession(item) {
+  $('session-group').value=item.group||'';
   editingId = item.id; $('session-url').value = item.url; $('session-name').value = item.name;
   document.querySelector(`input[name="profile"][value="${item.profile}"]`).checked = true;
   $('save-session').checked = true; $('form-title').textContent = 'Edit your session'; $('form-error').hidden = true; $('session-url').focus();
@@ -182,7 +218,7 @@ async function submitSession(connect) {
   $('form-error').hidden = true;
   $('join-button').disabled = true; $('save-only').disabled = true;
   try {
-    const input = { id: editingId, url: $('session-url').value, name: $('session-name').value, profile: document.querySelector('input[name="profile"]:checked').value };
+    const input = { id: editingId, url: $('session-url').value, name: $('session-name').value, group:$('session-group').value, profile: document.querySelector('input[name="profile"]:checked').value };
     if (!connect || $('save-session').checked) {
       const next = await invoke('save', input); editingId = next.savedId; input.id = editingId; render(next); $('form-title').textContent = 'Edit your session';
     } else input.id = null;
@@ -196,6 +232,23 @@ $('join-form').addEventListener('submit', event => { event.preventDefault(); sub
 $('save-only').onclick = () => submitSession(false);
 $('new-session').onclick = newSession;
 $('empty-add').onclick = newSession;
+$('session-search').oninput=$('session-group-filter').onchange=$('favorites-only').onchange=renderSessions;
+$('export-sessions').onclick=()=>safely(async()=>{if(await invoke('export-sessions'))toast('Session export saved.');});
+$('import-sessions').onclick=()=>safely(async()=>{const imported=await invoke('import-sessions');if(imported){render(imported.state);toast(`${imported.added} sessions imported.`);}});
+$('recover-session').onclick=()=>safely(async()=>render(await invoke('recover')));
+$('dismiss-recovery').onclick=()=>safely(async()=>render(await invoke('dismiss-recovery')));
+$('reconnect-game').onclick=()=>safely(async()=>render(await invoke('reload')));
+for(const name of ['showFps','showTime','showTitle','compact','focusKey','libraryKey'])$(`hud-${name}`).onchange=()=>safely(async()=>{
+  const field=$(`hud-${name}`);render(await invoke('hud',{[name]:field.type==='checkbox'?field.checked:field.value}));result('hud-result','HUD preference saved.');
+});
+$('reset-hud').onclick=()=>safely(async()=>render(await invoke('hud',{showFps:true,showTime:true,showTitle:true,compact:false,focusKey:'F',libraryKey:'L'})));
+$('save-world-settings').onclick=()=>safely(async()=>{
+  try{render(await invoke('remember-world',{profile:$('remember-profile').checked?performanceProfile:null,fps:$('remember-fps').checked?Number($('frame-limit').value):null}));}
+  catch(error){result('world-settings-result',errorText(error),true);}
+},$('save-world-settings'));
+$('forget-world-settings').onclick=()=>safely(async()=>{
+  try{render(await invoke('forget-world'));}catch(error){result('world-settings-result',errorText(error),true);}
+},$('forget-world-settings'));
 document.querySelectorAll('.nav-button').forEach(button => { button.onclick = () => safely(() => showPage(button.dataset.page)); });
 $('cancel-delete').onclick = () => $('delete-dialog').close();
 $('confirm-delete').onclick = () => safely(async () => { render(await invoke('remove', deleteId)); if (editingId === deleteId) newSession(); $('delete-dialog').close(); toast('Saved session removed.'); });
@@ -243,8 +296,8 @@ document.addEventListener('visibilitychange', scheduleDiagnostics);
 document.addEventListener('keydown', event => {
   const modifier = event.ctrlKey || event.metaKey;
   if (event.key === 'F11') { event.preventDefault(); safely(() => invoke('fullscreen')); }
-  else if (modifier && event.shiftKey && event.key.toLowerCase() === 'l') { event.preventDefault(); safely(() => showPage('sessions')); }
-  else if (modifier && event.shiftKey && event.key.toLowerCase() === 'f') { event.preventDefault(); safely(async () => render(await invoke('focus'))); }
+  else if (modifier && event.shiftKey && event.key.toLowerCase() === (state?.hud?.libraryKey||'L').toLowerCase()) { event.preventDefault(); safely(() => showPage('sessions')); }
+  else if (modifier && event.shiftKey && event.key.toLowerCase() === (state?.hud?.focusKey||'F').toLowerCase()) { event.preventDefault(); safely(async () => render(await invoke('focus'))); }
   else if (event.key === 'F5' || (modifier && event.key.toLowerCase() === 'r')) { event.preventDefault(); if (state?.active) safely(async () => render(await invoke('reload'))); }
 });
 window.client.onState(render);
